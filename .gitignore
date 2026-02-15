@@ -1,0 +1,27 @@
+# === BACKEND & OTHER DIRECTORIES (IGNORED) ===
+/backend_lambda/
+/document_upload/
+/lambda_ai/
+/textract_process_lambda/
+/database_schema.sql
+/upload_workflow.md
+/README.md
+
+# === SYSTEM & GENERIC IGNORES ===
+.DS_Store
+Thumbs.db
+*.log
+.env
+.env.local
+.vscode/
+.idea/
+
+# === FRONTEND SPECIFIC IGNORES ===
+# Keep folder but ignore build artifacts inside
+finance-app-frontend/node_modules/
+finance-app-frontend/build/
+finance-app-frontend/dist/
+finance-app-frontend/.env
+finance-app-frontend/npm-debug.log*
+finance-app-frontend/yarn-debug.log*
+finance-app-frontend/yarn-error.log*

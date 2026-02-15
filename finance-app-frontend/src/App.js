@@ -1,0 +1,99 @@
+import React from 'react';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import { ToastProvider } from './context/ToastContext';
+
+// Import Pages
+import Login from './pages/Login';
+import Dashboard from './pages/Dashboard';
+import AddExpense from './pages/AddExpense';
+import Documents from './pages/Documents'; // Receipt list
+import ReceiptDetail from './pages/ReceiptDetail';
+import Reports from './pages/Reports';
+import Planning from './pages/Planning';
+import Incomes from './pages/Incomes';
+
+// Global Styles
+import './App.css';
+
+// Protected Route Component
+const ProtectedRoute = ({ children }) => {
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background-light dark:bg-slate-900">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
+
+  return children;
+};
+
+function App() {
+  return (
+    <BrowserRouter>
+      <AuthProvider>
+        <ToastProvider>
+          <Routes>
+            {/* Public Routes */}
+            <Route path="/login" element={<Login />} />
+
+            {/* Protected Routes */}
+            <Route path="/" element={
+              <ProtectedRoute>
+                <Dashboard />
+              </ProtectedRoute>
+            } />
+
+            <Route path="/add-expense" element={
+              <ProtectedRoute>
+                <AddExpense />
+              </ProtectedRoute>
+            } />
+
+            <Route path="/receipts" element={
+              <ProtectedRoute>
+                <Documents />
+              </ProtectedRoute>
+            } />
+
+            <Route path="/receipts/:id" element={
+              <ProtectedRoute>
+                <ReceiptDetail />
+              </ProtectedRoute>
+            } />
+
+            <Route path="/reports" element={
+              <ProtectedRoute>
+                <Reports />
+              </ProtectedRoute>
+            } />
+
+            <Route path="/planning" element={
+              <ProtectedRoute>
+                <Planning />
+              </ProtectedRoute>
+            } />
+
+            <Route path="/incomes" element={
+              <ProtectedRoute>
+                <Incomes />
+              </ProtectedRoute>
+            } />
+
+            {/* Catch-all Route */}
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </ToastProvider>
+      </AuthProvider>
+    </BrowserRouter>
+  );
+}
+
+export default App;

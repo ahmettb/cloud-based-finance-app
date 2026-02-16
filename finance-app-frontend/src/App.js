@@ -11,6 +11,7 @@ import Documents from './pages/Documents'; // Receipt list
 import ReceiptDetail from './pages/ReceiptDetail';
 import Reports from './pages/Reports';
 import Planning from './pages/Planning';
+import Expenses from './pages/Expenses';
 import Incomes from './pages/Incomes';
 
 // Global Styles
@@ -75,9 +76,15 @@ function App() {
               </ProtectedRoute>
             } />
 
-            <Route path="/planning" element={
+            <Route path="/budget" element={
               <ProtectedRoute>
                 <Planning />
+              </ProtectedRoute>
+            } />
+
+            <Route path="/expenses" element={
+              <ProtectedRoute>
+                <Expenses />
               </ProtectedRoute>
             } />
 

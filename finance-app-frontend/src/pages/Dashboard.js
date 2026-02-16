@@ -165,6 +165,18 @@ const Dashboard = () => {
                         </span>
                     </h1>
                 </div>
+
+                {/* AI Analyzing Banner */}
+                {analyzing && (
+                    <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 animate-gradient-x z-50"></div>
+                )}
+                {analyzing && (
+                    <div className="fixed top-20 left-1/2 transform -translate-x-1/2 bg-slate-900 text-white px-6 py-3 rounded-full shadow-xl flex items-center gap-3 z-50 animate-bounce-slow">
+                        <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent"></div>
+                        <span className="font-bold text-sm">Yapay Zeka Harcamalarını Analiz Ediyor...</span>
+                    </div>
+                )}
+
                 <div className="flex gap-2 w-full sm:w-auto">
                     <button
                         onClick={() => setShowVoiceWizard(true)}
@@ -482,21 +494,25 @@ const Dashboard = () => {
                 </div>
             </div>
 
-            {showVoiceWizard && (
-                <VoiceExpenseWizard
-                    onSave={handleVoiceSaved}
-                    onClose={() => setShowVoiceWizard(false)}
-                />
-            )}
+            {
+                showVoiceWizard && (
+                    <VoiceExpenseWizard
+                        onSave={handleVoiceSaved}
+                        onClose={() => setShowVoiceWizard(false)}
+                    />
+                )
+            }
 
-            {showManualWizard && (
-                <ManualExpenseModal
-                    isOpen={showManualWizard}
-                    onClose={() => setShowManualWizard(false)}
-                    onSave={handleManualSaved}
-                />
-            )}
-        </DashboardLayout>
+            {
+                showManualWizard && (
+                    <ManualExpenseModal
+                        isOpen={showManualWizard}
+                        onClose={() => setShowManualWizard(false)}
+                        onSave={handleManualSaved}
+                    />
+                )
+            }
+        </DashboardLayout >
     );
 };
 

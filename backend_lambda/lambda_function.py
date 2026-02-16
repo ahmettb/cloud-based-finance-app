@@ -533,6 +533,40 @@ def _build_receipt_image_url(s3_key):
         return None
 
 
+def _fix_date(date_str):
+    """
+    Tries to parse YYYY-MM-DD. If day is out of range (e.g. Feb 30), clamps it to the last valid day of that month.
+    Returns ISO format string or None if completely invalid.
+    """
+    if not date_str or not isinstance(date_str, str):
+        return None
+    
+    # Simple syntax check
+    m = re.match(r"^(\d{4})-(\d{2})-(\d{2})$", date_str)
+    if not m:
+        return None
+        
+    y, mo, d = map(int, m.groups())
+    
+    # Clamp month
+    if mo < 1: mo = 1
+    if mo > 12: mo = 12
+    
+    # Try to create date, reducing day if necessary (e.g. 31 -> 30 -> 29 -> 28)
+    # We only Loop a few times because day is at most 31.
+    if d < 1: d = 1
+    if d > 31: d = 31
+    
+    for _ in range(4):
+        try:
+            return date(y, mo, d).isoformat()
+        except ValueError:
+            d -= 1
+            if d < 1: return None
+            
+    return None
+
+
 def handle_receipts_list(user_id, params):
     params = params or {}
     limit = min(max(int(params.get("limit", 50)), 1), 200)
@@ -554,12 +588,13 @@ def handle_receipts_list(user_id, params):
         except Exception:
             pass
 
-    start_date = params.get("start_date")
+    # Fix possible invalid dates (e.g. Feb 30) coming from frontend
+    start_date = _fix_date(params.get("start_date"))
     if start_date:
         filters.append("receipt_date >= %s")
         values.append(start_date)
 
-    end_date = params.get("end_date")
+    end_date = _fix_date(params.get("end_date"))
     if end_date:
         filters.append("receipt_date <= %s")
         values.append(end_date)

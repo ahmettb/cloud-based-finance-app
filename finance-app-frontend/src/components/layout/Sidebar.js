@@ -38,9 +38,14 @@ const Sidebar = ({ isOpen, onClose }) => {
                         Dokümanlar
                     </NavLink>
 
-                    <NavLink to="/planning" onClick={onClose} className={({ isActive }) => isActive ? activeClass : inactiveClass}>
+                    <NavLink to="/budget" onClick={onClose} className={({ isActive }) => isActive ? activeClass : inactiveClass}>
                         <span className="material-icons-round">fact_check</span>
-                        Planlama
+                        Bütçe Takibi
+                    </NavLink>
+
+                    <NavLink to="/expenses" onClick={onClose} className={({ isActive }) => isActive ? activeClass : inactiveClass}>
+                        <span className="material-icons-round">account_balance</span>
+                        Gider Yönetimi
                     </NavLink>
 
                     <NavLink to="/reports" onClick={onClose} className={({ isActive }) => isActive ? activeClass : inactiveClass}>

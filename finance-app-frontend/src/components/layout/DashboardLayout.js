@@ -32,7 +32,7 @@ const DashboardLayout = ({ children }) => {
             )}
 
             {/* Main Content Area */}
-            <main className="flex-1 overflow-x-hidden overflow-y-auto bg-transparent md:ml-64 print:ml-0 p-4 pt-16 md:p-6 transition-all print:p-0 print:overflow-visible">
+            <main className="flex-1 overflow-x-hidden overflow-y-auto bg-transparent print:ml-0 p-4 pt-16 md:p-6 transition-all print:p-0 print:overflow-visible">
                 {children}
             </main>
         </div>

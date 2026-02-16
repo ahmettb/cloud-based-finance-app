@@ -42,6 +42,8 @@ REFRESH_TOKEN_DAYS = int(os.environ.get("REFRESH_TOKEN_DAYS", "30"))
 AI_CACHE_TTL_SECONDS = int(os.environ.get("AI_CACHE_TTL_SECONDS", "21600"))
 OCR_MAX_FILE_BYTES = int(os.environ.get("OCR_MAX_FILE_BYTES", "3145728"))
 ALLOWED_ORIGIN = os.environ.get("ALLOWED_ORIGIN", "*")
+TOKEN_USE_ALLOWED = {x.strip() for x in os.environ.get("TOKEN_USE_ALLOWED", "access").split(",") if x.strip()}
+RUN_DB_MIGRATIONS_ON_START = os.environ.get("RUN_DB_MIGRATIONS_ON_START", "false").lower() == "true"
 
 # ============================================================
 # AWS CLIENTS
@@ -56,6 +58,7 @@ lambda_client = boto3.client("lambda", region_name=AWS_REGION)
 # ============================================================
 db_pool = None
 jwks_cache = None
+migration_checked = False
 
 CATEGORIES = {
     1: "Market",
@@ -269,9 +272,35 @@ def verify_jwt(token):
         if COGNITO_USER_POOL_ID and COGNITO_USER_POOL_ID not in issuer:
             return None
 
+        # Harden token validation scope.
+        # Access token => client_id, ID token => aud. Accept either but require match.
+        if COGNITO_CLIENT_ID:
+            token_client = claims.get("client_id") or claims.get("aud")
+            if token_client != COGNITO_CLIENT_ID:
+                return None
+
+        token_use = claims.get("token_use")
+        if TOKEN_USE_ALLOWED and token_use not in TOKEN_USE_ALLOWED:
+            return None
+
         return claims
     except Exception:
         return None
+
+
+def maybe_run_migrations_once():
+    """
+    Optional runtime migration guard for non-prod environments.
+    Disabled by default. For production, use deployment-time migrations.
+    """
+    global migration_checked
+    if migration_checked or not RUN_DB_MIGRATIONS_ON_START:
+        return
+    try:
+        ensure_tables_exist()
+        migration_checked = True
+    except Exception as exc:
+        logger.error(f"Migration check failed: {exc}")
 
 def _ensure_user_record(claims, fallback_full_name=None):
     conn = get_db_connection()
@@ -1208,29 +1237,64 @@ def handle_ai_analyze(user_id, body):
             # 2. Check if we have enough data - CRITICAL FIX
             if not sig_row or sig_row["count"] < 1:
                 empty_analysis = {
-                    "summary": "Bu ay için henüz analiz edilecek harcama verisi bulunamadı.",
+                    "coach": {
+                        "headline": "Analiz için yeterli veri yok.",
+                        "summary": "Bu ay için henüz analiz edilecek harcama verisi bulunamadı.",
+                        "focus_areas": ["Fiş ekleme", "Kategori düzeni", "Bütçe takibi"],
+                    },
                     "insights": [
-                        {"text": "Harcama verisi ekleyerek yapay zeka analizlerini başlatabilirsiniz.", "type": "warning"},
-                        {"text": "Manuel ekleme veya sesli asistanı kullanabilirsiniz.", "type": "info"}
+                        {
+                            "id": "ins_low_data_1",
+                            "type": "data_readiness",
+                            "priority": "MEDIUM",
+                            "title": "Yapay zeka analizi için veri biriktirin",
+                            "summary": "Daha doğru tahmin ve öneriler için bu ay en az birkaç harcama kaydı ekleyin.",
+                            "confidence": 95,
+                            "actions": ["Manuel gider ekleyin", "Fiş yükleyin", "Sesli asistanla kayıt oluşturun"],
+                        }
                     ],
                     "anomalies": [],
                     "forecast": {
                         "next_month_estimate": 0,
-                        "confidence_score": 0
-                    }
+                        "trend": "stable",
+                        "confidence_score": 0,
+                    },
+                    "patterns": {},
+                    "next_actions": [
+                        {"title": "Bu ay en az 3 harcamayı sisteme girin", "priority": "MEDIUM", "due_in_days": 7}
+                    ],
+                    "meta": {
+                        "generated_at": datetime.utcnow().isoformat() + "Z",
+                        "analysis_version": "v5",
+                        "period": period,
+                        "model_version": BEDROCK_MODEL_ID,
+                        "cache_hit": False,
+                        "insufficient_data": True,
+                    },
                 }
                 # Save empty state so dashboard can read it later
                 try:
+                    empty_meta = {
+                        "generated_at": datetime.utcnow().isoformat(),
+                        "data_sig": _compute_data_signature(sig_row["total"], sig_row["count"], sig_row["last_upd"] or datetime.min),
+                        "model": BEDROCK_MODEL_ID,
+                        "cache_hit": False,
+                        "ttl_seconds": AI_CACHE_TTL_SECONDS,
+                    }
                     cur.execute("DELETE FROM ai_insights WHERE user_id=%s AND related_period=%s", (user_id, period))
                     cur.execute(
                         "INSERT INTO ai_insights (user_id, insight_type, insight_text, related_period) VALUES (%s,%s,%s,%s)",
-                        (user_id, "__result__", json.dumps(empty_analysis), period),
+                        (user_id, "__meta__", json.dumps(empty_meta, default=_json_default), period),
+                    )
+                    cur.execute(
+                        "INSERT INTO ai_insights (user_id, insight_type, insight_text, related_period) VALUES (%s,%s,%s,%s)",
+                        (user_id, "__result__", json.dumps(empty_analysis, default=_json_default), period),
                     )
                     conn.commit()
                 except Exception as e:
                     logger.error(f"Failed to save empty state: {e}")
 
-                return api_response(200, {"analysis_result": empty_analysis})
+                return api_response(200, empty_analysis)
 
             current_data_sig = _compute_data_signature(sig_row["total"], sig_row["count"], sig_row["last_upd"] or datetime.min)
 
@@ -1933,11 +1997,8 @@ def ensure_tables_exist():
 
 
 def lambda_handler(event, context):
-    # Ensure database schema is up to date
-    try:
-        ensure_tables_exist()
-    except Exception as e:
-        logger.error(f"Migration check failed: {e}")
+    # Optional runtime migration (disabled by default).
+    maybe_run_migrations_once()
 
     try:
         method = event.get("httpMethod", "")

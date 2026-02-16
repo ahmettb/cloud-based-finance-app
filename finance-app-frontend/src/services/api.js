@@ -175,6 +175,13 @@ export const api = {
 
     getDetailedReports: (month) => fetchWithAuth(`/reports/detailed?month=${month}`),
 
+    getReportAISummary: (month) => fetchWithAuth(`/reports/ai-summary?month=${month}`),
+
+    sendReportAIFeedback: (data) => fetchWithAuth('/reports/ai-feedback', {
+        method: 'POST',
+        body: JSON.stringify(data)
+    }),
+
     getReportsSummary: (months = 12) => fetchWithAuth(`/reports/summary?months=${months}`),
 
     uploadReceipt: async (file) => {

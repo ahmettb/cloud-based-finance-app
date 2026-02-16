@@ -103,6 +103,16 @@ def _clamp(v, lo, hi):
     return max(lo, min(hi, v))
 
 
+def _compact_text(text, max_len=None):
+    """Token-friendly text sanitizer: collapse spaces/newlines and optionally trim."""
+    if text is None:
+        return ""
+    out = re.sub(r"\s+", " ", str(text)).strip()
+    if max_len and len(out) > max_len:
+        return out[:max_len]
+    return out
+
+
 def _confidence(sample_size, signal_strength=0.0):
     """Confidence score: sample size + signal quality -> 0-100"""
     base = min(70, max(0, sample_size) * 12)
@@ -896,11 +906,15 @@ class LLMEnricher:
     @staticmethod
     def _build_prompt(period, insights, forecast, patterns):
         """Minimal token prompt"""
-        lines = [f"P:{period}"]
+        lines = [f"P:{_compact_text(period, 12)}"]
 
         # Forecast summary
         if forecast:
-            lines.append(f"FX:{forecast.get('trend')}|est:{forecast.get('next_month_estimate', 0):.0f}|conf:{forecast.get('confidence_score', 0)}")
+            lines.append(
+                f"FX:{_compact_text(forecast.get('trend'), 10)}|"
+                f"est:{forecast.get('next_month_estimate', 0):.0f}|"
+                f"conf:{forecast.get('confidence_score', 0)}"
+            )
 
         # Pattern signals
         vel = patterns.get('velocity')
@@ -909,7 +923,7 @@ class LLMEnricher:
 
         shifts = patterns.get('category_shifts')
         if shifts and shifts.get('shifts'):
-            s_parts = [f"{s['category']}:{s['change_pct']:+.0f}%" for s in shifts['shifts'][:4]]
+            s_parts = [f"{_compact_text(s['category'], 16)}:{s['change_pct']:+.0f}%" for s in shifts['shifts'][:3]]
             lines.append(f"SHIFT:{'|'.join(s_parts)}")
 
         recurring = patterns.get('recurring_payments')
@@ -917,8 +931,12 @@ class LLMEnricher:
             lines.append(f"RECUR:{recurring.get('total_monthly',0):.0f}TL/ay|{len(recurring.get('items',[]))}adet")
 
         # Card summaries (compact)
-        for c in insights[:5]:
-            lines.append(f"C:{c.get('id')}|{c.get('priority')}|{c.get('title')}|{c.get('summary','')[:60]}")
+        for c in insights[:4]:
+            cid = _compact_text(c.get('id'), 24)
+            pr = _compact_text(c.get('priority'), 10)
+            title = _compact_text(c.get('title'), 48)
+            summary = _compact_text(c.get('summary', ''), 56)
+            lines.append(f"C:{cid}|{pr}|{title}|{summary}")
 
         return "\n".join(lines)
 
@@ -943,7 +961,7 @@ class LLMEnricher:
 
             # ── Sanitized prompt logging (no PII) ──
             logger.info(f"LLM prompt size: {len(prompt)} chars, ~{len(prompt.split())} tokens")
-            logger.info(f"LLM prompt preview: {prompt[:150]}...")
+            logger.info(f"LLM prompt preview: {_compact_text(prompt, 140)}...")
 
             # ── Lazy Bedrock init ──
             client = _get_bedrock()

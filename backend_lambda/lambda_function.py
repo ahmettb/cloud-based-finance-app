@@ -745,18 +745,12 @@ def handle_receipt_process(user_id, receipt_id):
             image_b64 = base64.b64encode(file_bytes).decode("utf-8")
             system_prompt = "You are a financial AI assistant. Analyze the receipt image and extraction structured data. Output ONLY raw JSON. No markdown formatting, no code blocks, no conversational text."
             
-            user_prompt = """
-            Extract the following fields from the image:
-            - merchant_name (string)
-            - total_amount (number)
-            - receipt_date (string, YYYY-MM-DD or today)
-            - items (array of objects with 'name' and 'price')
-            - currency (string, default 'TRY')
-            - category_id (integer, 1-8 based on merchant/items)
-
-            Categories: 1:Market, 2:Restoran, 3:Kafe, 4:Eğlence, 5:Fatura, 6:Giyim, 7:Ulaşım, 8:Diğer. 
-            Example: {"merchant_name": "Migros", "total_amount": 120.50, "receipt_date": "2024-05-20", "items": [{"name":"Ekmek","price":10}], "currency": "TRY", "category_id": 1}
-            """
+            user_prompt = (
+                "Extract JSON only with fields: merchant_name,total_amount,receipt_date(YYYY-MM-DD),"
+                "items[{name,price}],currency(default TRY),category_id(1-8). "
+                "Categories:1 Market,2 Restoran,3 Kafe,4 Eğlence,5 Fatura,6 Giyim,7 Ulaşım,8 Diğer. "
+                "No markdown or extra text."
+            )
 
             payload = {
                 "anthropic_version": "bedrock-2023-05-31",
@@ -1521,27 +1515,12 @@ def handle_smart_extract(user_id, body):
     today = date.today().isoformat()
     cat_list = ",".join(CATEGORIES.values())
 
-    # OPTIMIZED PROMPT (Low Token Usage)
-    prompt = f"""Current Date: {today}
-Input: "{text}"
-Cats: {cat_list}, Diğer
-
-Task: Extract financial data. Rules:
-1. merchant_name: Place/Store
-2. total_amount: Number
-3. receipt_date: YYYY-MM-DD
-4. category_name: From Cats
-5. description: Brief
-
-Output must be VALID JSON. No extra text.
-{{
-  "merchant_name": "string",
-  "total_amount": 0.0,
-  "receipt_date": "YYYY-MM-DD",
-  "category_name": "string",
-  "description": "string"
-}}
-"""
+    normalized_text = re.sub(r"\s+", " ", text).strip()[:350]
+    prompt = (
+        f"Date:{today}; Input:{normalized_text}; Cats:{cat_list},Diğer. "
+        "Return ONLY valid JSON with merchant_name,total_amount,receipt_date(YYYY-MM-DD),"
+        "category_name,description. No markdown."
+    )
 
     try:
         bedrock = boto3.client(service_name="bedrock-runtime", region_name="us-east-1")
@@ -1966,6 +1945,267 @@ def handle_reports_detailed(user_id, params):
         release_db_connection(conn)
 
 
+def handle_reports_ai_summary(user_id, params):
+    params = params or {}
+    month_str = params.get("month", datetime.now().strftime("%Y-%m"))
+
+    conn = get_db_connection()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT COUNT(*) AS count,
+                       COALESCE(SUM(total_amount), 0) AS total,
+                       COALESCE(AVG(total_amount), 0) AS avg
+                FROM receipts
+                WHERE user_id=%s AND status != 'deleted' AND TO_CHAR(receipt_date, 'YYYY-MM')=%s
+                """,
+                (user_id, month_str),
+            )
+            stats = cur.fetchone() or {"count": 0, "total": 0, "avg": 0}
+
+            count = int(stats.get("count") or 0)
+            total = _safe_float(stats.get("total"), 0.0)
+            avg = _safe_float(stats.get("avg"), 0.0)
+
+            cur.execute(
+                """
+                SELECT category_id, SUM(total_amount) AS total, COUNT(*) AS count
+                FROM receipts
+                WHERE user_id=%s AND status != 'deleted' AND TO_CHAR(receipt_date, 'YYYY-MM')=%s
+                GROUP BY category_id
+                ORDER BY total DESC
+                LIMIT 3
+                """,
+                (user_id, month_str),
+            )
+            category_rows = cur.fetchall()
+
+            cur.execute(
+                """
+                SELECT COALESCE(merchant_name, 'Bilinmeyen') AS merchant,
+                       COUNT(*) AS tx_count,
+                       SUM(total_amount) AS total,
+                       AVG(total_amount) AS avg_amount
+                FROM receipts
+                WHERE user_id=%s AND status != 'deleted' AND TO_CHAR(receipt_date, 'YYYY-MM')=%s
+                GROUP BY 1
+                ORDER BY tx_count DESC, total DESC
+                LIMIT 5
+                """,
+                (user_id, month_str),
+            )
+            merchant_rows = cur.fetchall()
+
+            cur.execute(
+                """
+                SELECT id, merchant_name, total_amount, receipt_date, category_id
+                FROM receipts
+                WHERE user_id=%s AND status != 'deleted' AND TO_CHAR(receipt_date, 'YYYY-MM')=%s
+                ORDER BY total_amount DESC
+                LIMIT 2
+                """,
+                (user_id, month_str),
+            )
+            highest_rows = cur.fetchall()
+
+            cur.execute(
+                """
+                SELECT CASE WHEN EXTRACT(DOW FROM receipt_date) IN (0,6) THEN 'weekend' ELSE 'weekday' END AS day_type,
+                       COUNT(*) AS count,
+                       COALESCE(SUM(total_amount), 0) AS total
+                FROM receipts
+                WHERE user_id=%s AND status != 'deleted' AND TO_CHAR(receipt_date, 'YYYY-MM')=%s
+                GROUP BY 1
+                """,
+                (user_id, month_str),
+            )
+            day_rows = cur.fetchall()
+
+            cur.execute(
+                """
+                SELECT TO_CHAR(receipt_date, 'YYYY-MM') AS month,
+                       COALESCE(SUM(total_amount), 0) AS total
+                FROM receipts
+                WHERE user_id=%s
+                  AND status != 'deleted'
+                  AND receipt_date >= (TO_DATE(%s, 'YYYY-MM') - INTERVAL '1 month')
+                  AND receipt_date < (TO_DATE(%s, 'YYYY-MM') + INTERVAL '1 month')
+                GROUP BY 1
+                ORDER BY 1 ASC
+                """,
+                (user_id, month_str, month_str),
+            )
+            month_compare_rows = cur.fetchall()
+
+            weekend_total = 0.0
+            weekday_total = 0.0
+            for r in day_rows:
+                if r.get("day_type") == "weekend":
+                    weekend_total = _safe_float(r.get("total"), 0.0)
+                else:
+                    weekday_total = _safe_float(r.get("total"), 0.0)
+
+            risk_score = 20
+            if avg > 0 and total > (avg * count * 1.05):
+                risk_score += 10
+            if weekend_total > weekday_total and weekend_total > 0:
+                risk_score += 20
+            if count > 0 and highest_rows:
+                top_amt = _safe_float(highest_rows[0].get("total_amount"), 0.0)
+                if avg > 0 and top_amt >= avg * 2.2:
+                    risk_score += 25
+            if count >= 20:
+                risk_score += 10
+            risk_score = int(max(0, min(100, risk_score)))
+
+            current_month_total = total
+            prev_month_total = 0.0
+            for row in month_compare_rows:
+                m = row.get("month")
+                if m == month_str:
+                    current_month_total = _safe_float(row.get("total"), current_month_total)
+                else:
+                    prev_month_total = _safe_float(row.get("total"), prev_month_total)
+
+            trend_pct = 0.0
+            if prev_month_total > 0:
+                trend_pct = ((current_month_total - prev_month_total) / prev_month_total) * 100
+
+            top_category = category_rows[0] if category_rows else None
+            top_category_name = CATEGORIES.get((top_category or {}).get("category_id"), "Diğer") if top_category else "Belirsiz"
+
+            monthly_summary = (
+                f"{month_str} döneminde toplam {_safe_float(total):.0f} TL harcama ve {count} işlem kaydı var. "
+                f"En baskın kategori: {top_category_name}."
+            )
+            if prev_month_total > 0:
+                direction = "artış" if trend_pct > 0 else "düşüş"
+                monthly_summary += f" Bir önceki aya göre %{abs(trend_pct):.1f} {direction} gözleniyor."
+
+            critical_events = []
+            for idx, row in enumerate(highest_rows, start=1):
+                amount = _safe_float(row.get("total_amount"), 0.0)
+                critical_events.append(
+                    {
+                        "id": f"high_{idx}",
+                        "type": "high_spend",
+                        "title": f"Yüksek harcama: {amount:.0f} TL",
+                        "merchant": row.get("merchant_name") or "Bilinmeyen",
+                        "amount": amount,
+                        "date": row.get("receipt_date"),
+                        "category": CATEGORIES.get(row.get("category_id"), "Diğer"),
+                        "reason": "Aylık en yüksek tutarlı işlemler arasında.",
+                        "confidence": 90,
+                    }
+                )
+
+            merchant_frequency = []
+            for row in merchant_rows:
+                merchant_frequency.append(
+                    {
+                        "merchant": row.get("merchant") or "Bilinmeyen",
+                        "tx_count": int(row.get("tx_count") or 0),
+                        "total": _safe_float(row.get("total"), 0.0),
+                        "avg_amount": _safe_float(row.get("avg_amount"), 0.0),
+                    }
+                )
+
+            category_comments = []
+            for row in category_rows[:3]:
+                cat_total = _safe_float(row.get("total"), 0.0)
+                pct = (cat_total / total * 100) if total > 0 else 0
+                category_comments.append(
+                    {
+                        "category": CATEGORIES.get(row.get("category_id"), "Diğer"),
+                        "comment": f"Bu kategoride {int(row.get('count') or 0)} işlem ile toplam {cat_total:.0f} TL (%{pct:.1f}) harcandı.",
+                        "confidence": 88,
+                    }
+                )
+
+            what_if = []
+            if top_category:
+                tc_total = _safe_float(top_category.get("total"), 0.0)
+                for ratio in (0.1, 0.15):
+                    save = round(tc_total * ratio, 2)
+                    what_if.append(
+                        {
+                            "title": f"{top_category_name} kategorisinde %{int(ratio*100)} azaltım",
+                            "estimated_monthly_saving": save,
+                            "reason": f"En büyük kategori payı buradan geliyor; küçük azaltım etkisi yüksek olur.",
+                            "confidence": 80,
+                        }
+                    )
+
+            response = {
+                "month": month_str,
+                "risk_score": risk_score,
+                "monthly_summary": monthly_summary,
+                "critical_events": critical_events,
+                "merchant_frequency": merchant_frequency,
+                "what_if": what_if,
+                "category_comments": category_comments,
+                "meta": {
+                    "generated_at": datetime.utcnow().isoformat() + "Z",
+                    "confidence": 82 if count >= 8 else 65,
+                    "input_stats": {
+                        "transaction_count": count,
+                        "total_spent": round(total, 2),
+                        "weekend_total": round(weekend_total, 2),
+                        "weekday_total": round(weekday_total, 2),
+                    },
+                },
+            }
+
+            return api_response(200, response)
+    finally:
+        release_db_connection(conn)
+
+
+def handle_reports_ai_feedback(user_id, body):
+    body = body or {}
+    month = _parse_period(body.get("month"))
+    feedback_type = str(body.get("feedback_type") or "").strip().lower()
+    section = str(body.get("section") or "reports_ai_summary").strip()[:64]
+    item_id = str(body.get("item_id") or "").strip()[:64]
+    note = re.sub(r"\s+", " ", str(body.get("note") or "")).strip()[:280]
+
+    if feedback_type not in {"useful", "not_useful"}:
+        return api_response(400, {"error": "feedback_type must be useful or not_useful"})
+
+    feedback_payload = {
+        "month": month,
+        "feedback_type": feedback_type,
+        "section": section,
+        "item_id": item_id,
+        "note": note,
+        "source": "reports",
+        "created_at": datetime.utcnow().isoformat() + "Z",
+    }
+
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO ai_insights (user_id, insight_type, insight_text, related_period, priority)
+                VALUES (%s,%s,%s,%s,%s)
+                """,
+                (
+                    user_id,
+                    "__feedback__",
+                    json.dumps(feedback_payload, default=_json_default),
+                    month,
+                    "LOW",
+                ),
+            )
+            conn.commit()
+
+        return api_response(200, {"message": "Feedback kaydedildi"})
+    finally:
+        release_db_connection(conn)
+
+
 def ensure_tables_exist():
     """Checks and creates necessary tables if they don't exist."""
     conn = get_db_connection()
@@ -2094,11 +2334,17 @@ def lambda_handler(event, context):
                 income_id = parts[2]
             return handle_incomes(user_id, method, body, income_id)
 
-        if path == "/reports/chart":
+        if path == "/reports/chart" and method == "GET":
             return handle_chart_data(user_id, event.get("queryStringParameters"))
 
-        if path == "/reports/detailed":
+        if path == "/reports/detailed" and method == "GET":
             return handle_reports_detailed(user_id, event.get("queryStringParameters"))
+
+        if path == "/reports/ai-summary" and method == "GET":
+            return handle_reports_ai_summary(user_id, event.get("queryStringParameters") or {})
+
+        if path == "/reports/ai-feedback" and method == "POST":
+            return handle_reports_ai_feedback(user_id, body)
 
         return api_response(404, {"error": "Endpoint not found"})
     except Exception as exc:

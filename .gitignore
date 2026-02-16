@@ -1,11 +1,50 @@
 # === BACKEND & OTHER DIRECTORIES (IGNORED) ===
-/backend_lambda/
 /document_upload/
-/lambda_ai/
 /textract_process_lambda/
-/database_schema.sql
-/upload_workflow.md
-/README.md
+# /database_schema.sql # Commonly tracked, uncomment if you want to track it
+# /upload_workflow.md # Commonly tracked, uncomment if you want to track it
+# /README.md # Commonly tracked, uncomment if you want to track it
+
+# === PYTHON & LAMBDA IGNORES ===
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.so
+*.dylib
+*.dll
+.Python
+env/
+venv/
+*.zip
+*.tar.gz
+*.egg-info/
+*.dist-info/
+.pytest_cache/
+.coverage
+
+# === GENERATED PYTHON LIBS (Specific to this project's flat install) ===
+boto3/
+botocore/
+cffi/
+cryptography/
+dateutil/
+ecdsa/
+jmespath/
+jose/
+psycopg2/
+psycopg2_binary.libs/
+pyasn1/
+pycparser/
+rsa/
+s3transfer/
+six.py
+urllib3/
+requests/
+certifi/
+charset_normalizer/
+idna/
+bin/
 
 # === SYSTEM & GENERIC IGNORES ===
 .DS_Store

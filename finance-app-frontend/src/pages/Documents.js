@@ -4,6 +4,7 @@ import DashboardLayout from '../components/layout/DashboardLayout';
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '../context/ToastContext';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
+import { VARIABLE_CATEGORIES } from '../constants/categories';
 
 const Documents = () => {
     const navigate = useNavigate();
@@ -23,11 +24,12 @@ const Documents = () => {
     const [deleteId, setDeleteId] = useState(null); // ID to delete for confirmation dialog
 
     // Categories for filter
-    const categories = ['Market', 'Restoran', 'Kafe', 'Ulaşım', 'Fatura', 'Giyim', 'Sağlık', 'Eğlence', 'Teknoloji', 'Diğer'];
+    const categories = VARIABLE_CATEGORIES;
 
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     useEffect(() => {
         fetchReceipts();
-    }, []);
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
     const fetchReceipts = async () => {
         try {
@@ -383,3 +385,7 @@ const Documents = () => {
 };
 
 export default Documents;
+
+
+
+

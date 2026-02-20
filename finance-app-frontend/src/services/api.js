@@ -144,6 +144,38 @@ export const api = {
 
     getSubscriptions: () => fetchWithAuth('/subscriptions'),
     addSubscription: (data) => fetchWithAuth('/subscriptions', { method: 'POST', body: JSON.stringify(data) }),
+    deleteSubscription: (id) => fetchWithAuth(`/subscriptions/${id}`, { method: 'DELETE' }),
+
+    getFixedExpenses: (month) => {
+        const query = month ? `?month=${month}` : '';
+        return fetchWithAuth(`/fixed-expenses${query}`);
+    },
+    createFixedExpenseGroup: (data) => fetchWithAuth('/fixed-expenses/groups', {
+        method: 'POST',
+        body: JSON.stringify(data)
+    }),
+    updateFixedExpenseGroup: (groupId, data) => fetchWithAuth(`/fixed-expenses/groups/${groupId}`, {
+        method: 'PUT',
+        body: JSON.stringify(data)
+    }),
+    deleteFixedExpenseGroup: (groupId) => fetchWithAuth(`/fixed-expenses/groups/${groupId}`, {
+        method: 'DELETE'
+    }),
+    addFixedExpenseItem: (data) => fetchWithAuth('/fixed-expenses/items', {
+        method: 'POST',
+        body: JSON.stringify(data)
+    }),
+    updateFixedExpenseItem: (itemId, data) => fetchWithAuth(`/fixed-expenses/items/${itemId}`, {
+        method: 'PUT',
+        body: JSON.stringify(data)
+    }),
+    deleteFixedExpenseItem: (itemId) => fetchWithAuth(`/fixed-expenses/items/${itemId}`, {
+        method: 'DELETE'
+    }),
+    saveFixedExpensePayment: (itemId, data) => fetchWithAuth(`/fixed-expenses/items/${itemId}/payments`, {
+        method: 'POST',
+        body: JSON.stringify(data)
+    }),
 
     exportData: async () => {
         const meta = await fetchWithAuth('/export');
@@ -183,6 +215,44 @@ export const api = {
     }),
 
     getReportsSummary: (months = 12) => fetchWithAuth(`/reports/summary?months=${months}`),
+
+    getInsightsOverview: (month) => {
+        const query = month ? `?month=${month}` : '';
+        return fetchWithAuth(`/insights/overview${query}`);
+    },
+    getInsightsWhatIf: (params = {}) => {
+        const query = new URLSearchParams(params).toString();
+        return fetchWithAuth(`/insights/what-if?${query}`);
+    },
+
+    getAIActions: (month) => {
+        const query = month ? `?month=${month}` : '';
+        return fetchWithAuth(`/ai-actions${query}`);
+    },
+    syncAIActions: (month, actions = []) => fetchWithAuth('/ai-actions', {
+        method: 'POST',
+        body: JSON.stringify({ month, actions })
+    }),
+    updateAIAction: (id, data) => fetchWithAuth(`/ai-actions/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(data)
+    }),
+    deleteAIAction: (id) => fetchWithAuth(`/ai-actions/${id}`, {
+        method: 'DELETE'
+    }),
+
+    getGoals: () => fetchWithAuth('/goals'),
+    createGoal: (data) => fetchWithAuth('/goals', {
+        method: 'POST',
+        body: JSON.stringify(data)
+    }),
+    updateGoal: (id, data) => fetchWithAuth(`/goals/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(data)
+    }),
+    deleteGoal: (id) => fetchWithAuth(`/goals/${id}`, {
+        method: 'DELETE'
+    }),
 
     uploadReceipt: async (file) => {
         try {

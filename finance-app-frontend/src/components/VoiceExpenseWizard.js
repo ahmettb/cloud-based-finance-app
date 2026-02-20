@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { api } from '../services/api';
 import { useToast } from '../context/ToastContext';
+import { resolveCategoryId } from '../constants/categories';
 
 const VoiceExpenseWizard = ({ onSave, onClose }) => {
     const toast = useToast();
@@ -22,12 +23,9 @@ const VoiceExpenseWizard = ({ onSave, onClose }) => {
             recognitionRef.current.lang = 'tr-TR';
 
             recognitionRef.current.onresult = (event) => {
-                let interm = '';
                 for (let i = event.resultIndex; i < event.results.length; i++) {
                     if (event.results[i].isFinal) {
                         setTranscript(prev => prev + ' ' + event.results[i][0].transcript);
-                    } else {
-                        interm += event.results[i][0].transcript;
                     }
                 }
             };
@@ -44,7 +42,7 @@ const VoiceExpenseWizard = ({ onSave, onClose }) => {
         } else {
             toast.show.error("Tarayıcınız sesli komutu desteklemiyor.");
         }
-    }, []);
+    }, [toast]);
 
     const toggleListening = () => {
         if (isListening) {
@@ -81,7 +79,10 @@ const VoiceExpenseWizard = ({ onSave, onClose }) => {
     const handleSave = async () => {
         if (!result) return;
         try {
-            await api.createManualExpense(result);
+            await api.createManualExpense({
+                ...result,
+                category_id: resolveCategoryId(result.category_name)
+            });
             toast.show.success("Harcama kaydedildi!");
             onSave(); // Refresh dashboard
             onClose();
@@ -227,3 +228,4 @@ const VoiceExpenseWizard = ({ onSave, onClose }) => {
 };
 
 export default VoiceExpenseWizard;
+

@@ -13,6 +13,7 @@ import Reports from './pages/Reports';
 import Planning from './pages/Planning';
 import Expenses from './pages/Expenses';
 import Incomes from './pages/Incomes';
+import Insights from './pages/Insights';
 
 // Global Styles
 import './App.css';
@@ -91,6 +92,12 @@ function App() {
             <Route path="/incomes" element={
               <ProtectedRoute>
                 <Incomes />
+              </ProtectedRoute>
+            } />
+
+            <Route path="/insights" element={
+              <ProtectedRoute>
+                <Insights />
               </ProtectedRoute>
             } />
 

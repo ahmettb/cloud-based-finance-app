@@ -42,6 +42,7 @@ const Dashboard = () => {
     const [showManualWizard, setShowManualWizard] = useState(false);
 
     // Initial Load
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     useEffect(() => {
         const fetchData = async () => {
             try {
@@ -61,9 +62,10 @@ const Dashboard = () => {
         };
 
         fetchData();
-    }, []);
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
     // Fetch Chart Data on Range or Type Change
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     useEffect(() => {
         const fetchChart = async () => {
             try {
@@ -341,7 +343,7 @@ const Dashboard = () => {
                                 )) : <p className="text-xs text-slate-400">Abonelik bulunamadı.</p>}
                             </div>
                             <div className="mt-4 pt-3 border-t border-slate-50 dark:border-slate-800">
-                                <button onClick={() => navigate('/planning')} className="text-xs font-bold text-indigo-600 hover:text-indigo-700 flex items-center gap-1">
+                                <button onClick={() => navigate('/budget')} className="text-xs font-bold text-indigo-600 hover:text-indigo-700 flex items-center gap-1">
                                     Tümünü Gör <span className="material-icons-round text-xs">arrow_forward</span>
                                 </button>
                             </div>
@@ -366,7 +368,7 @@ const Dashboard = () => {
                                 )) : <p className="text-xs text-slate-400">Bütçe hedefi bulunamadı.</p>}
                             </div>
                             <div className="mt-4 pt-3 border-t border-slate-50 dark:border-slate-800">
-                                <button onClick={() => navigate('/planning')} className="text-xs font-bold text-indigo-600 hover:text-indigo-700 flex items-center gap-1">
+                                <button onClick={() => navigate('/budget')} className="text-xs font-bold text-indigo-600 hover:text-indigo-700 flex items-center gap-1">
                                     Detaylı Planlama <span className="material-icons-round text-xs">arrow_forward</span>
                                 </button>
                             </div>
@@ -421,7 +423,9 @@ const Dashboard = () => {
                                         <div key={idx} className="bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-800/30 p-2 rounded-lg flex gap-2 items-start">
                                             <span className="material-icons-round text-red-500 text-sm mt-0.5">error_outline</span>
                                             <p className="text-xs text-red-700 dark:text-red-300 font-medium">
-                                                {typeof anom === 'string' ? anom : anom.text || 'Anomali tespit edildi'}
+                                                {typeof anom === 'string'
+                                                    ? anom
+                                                    : `${anom.merchant || 'İşlem'} için ${currencyFormatter.format(anom.amount || 0)} tutarlı anomali`}
                                             </p>
                                         </div>
                                     ))}
@@ -432,13 +436,12 @@ const Dashboard = () => {
                             {analysis.insights && analysis.insights.length > 0 && (
                                 <div className="space-y-2">
                                     {analysis.insights.slice(0, 5).map((insight, idx) => {
-                                        const txt = typeof insight === 'string' ? insight : insight.text;
-                                        const type = typeof insight === 'object' ? insight.type : 'info';
+                                        const txt = typeof insight === 'string'
+                                            ? insight
+                                            : (insight.summary || insight.title || insight.text || 'AI İçgörü');
+                                        const type = typeof insight === 'object' && insight.priority === 'HIGH' ? 'warning' : 'info';
                                         return (
                                             <div key={idx} className="flex gap-2 text-xs text-slate-600 dark:text-slate-400">
-                                                <span className={`material-icons-round text-[14px] ${type === 'warning' ? 'text-amber-500' : 'text-indigo-400'}`}>
-                                                    {type === 'warning' ? 'warning_amber' : 'lens'}
-                                                </span>
                                                 <span className="flex-1">{txt}</span>
                                             </div>
                                         );
@@ -517,3 +520,7 @@ const Dashboard = () => {
 };
 
 export default Dashboard;
+
+
+
+

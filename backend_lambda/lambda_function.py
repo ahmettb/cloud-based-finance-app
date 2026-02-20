@@ -1,4 +1,5 @@
 import base64
+import calendar
 import csv
 import decimal
 import hashlib
@@ -60,28 +61,40 @@ db_pool = None
 jwks_cache = None
 migration_checked = False
 
+def _normalize_text(value):
+    if value is None:
+        return ""
+    text = str(value).strip().lower()
+    replacements = {
+        "ı": "i", "ş": "s", "ç": "c", "ğ": "g", "ü": "u", "ö": "o",
+        "İ": "i", "Ş": "s", "Ç": "c", "Ğ": "g", "Ü": "u", "Ö": "o",
+    }
+    for src, target in replacements.items():
+        text = text.replace(src, target)
+    return text
+
 CATEGORIES = {
-    1: "Market",
-    2: "Restoran",
-    3: "Kafe",
-    4: "Online Alışveriş",
-    5: "Fatura",
-    6: "Konaklama",
-    7: "Ulaşım",
-    8: "Diğer",
+    1: 'Market',
+    2: 'Restoran',
+    3: 'Kafe',
+    4: 'Online Alışveriş',
+    5: 'Fatura',
+    6: 'Konaklama',
+    7: 'Ulaşım',
+    8: 'Diğer',
 }
 
-CATEGORY_NAME_TO_ID = {name.lower(): cid for cid, name in CATEGORIES.items()}
+CATEGORY_NAME_TO_ID = {_normalize_text(name): cid for cid, name in CATEGORIES.items()}
 
 CATEGORY_KEYWORDS = {
-    1: ["migros", "carrefour", "bim", "sok", "a101", "market", "bakkal", "tekel", "gıda", "firin"],
-    2: ["restaurant", "lokanta", "kebap", "burger", "pizza", "döner", "kofte", "pide", "lahmacun"],
-    3: ["starbucks", "kahve", "cafe", "espresso", "latte", "cay", "tchibo", "arabica"],
-    4: ["amazon", "trendyol", "hepsiburada", "getir", "n11", "boyner", "zara", "mango", "teknosa"],
-    5: ["enerjisa", "igdas", "iski", "turkcell", "vodafone", "telekom", "fatura", "elektrik", "su", "internet", "netflix", "spotify"],
-    6: ["otel", "hotel", "pansiyon", "konaklama", "airbnb", "tatil", "resort", "hostel"],
-    7: ["taksi", "uber", "petrol", "shell", "opet", "bilet", "thy", "pegasus", "metro", "iett", "benzin", "motorin", "lpg"],
-    8: ["eczane", "hastane", "saglik", "doktor", "klinik", "kuafor", "berber", "kirtasiye", "noter", "vergi", "diger"],
+    1: ['migros', 'carrefour', 'bim', 'sok', 'a101', 'market', 'bakkal', 'tekel', 'gida', 'firin'],
+    2: ['restaurant', 'lokanta', 'kebap', 'burger', 'pizza', 'doner', 'kofte', 'pide', 'lahmacun'],
+    3: ['starbucks', 'kahve', 'cafe', 'espresso', 'latte', 'cay', 'tchibo', 'arabica'],
+    4: ['amazon', 'trendyol', 'hepsiburada', 'getir', 'n11', 'boyner', 'zara', 'mango', 'teknosa'],
+    5: ['enerjisa', 'igdas', 'iski', 'turkcell', 'vodafone', 'telekom', 'fatura', 'elektrik', 'su', 'internet', 'netflix', 'spotify'],
+    6: ['otel', 'hotel', 'pansiyon', 'konaklama', 'airbnb', 'tatil', 'resort', 'hostel'],
+    7: ['taksi', 'uber', 'petrol', 'shell', 'opet', 'bilet', 'thy', 'pegasus', 'metro', 'iett', 'benzin', 'motorin', 'lpg'],
+    8: ['eczane', 'hastane', 'saglik', 'doktor', 'klinik', 'kuafor', 'berber', 'kirtasiye', 'noter', 'vergi', 'diger'],
 }
 
 SUPPORTED_UPLOAD_TYPES = {
@@ -101,7 +114,7 @@ def _json_default(value):
 
 def api_response(status_code, body):
     headers = {
-        "Content-Type": "application/json",
+        "Content-Type": "application/json; charset=utf-8",
         "Access-Control-Allow-Origin": ALLOWED_ORIGIN,
         "Access-Control-Allow-Headers": "Content-Type,Authorization",
         "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
@@ -111,7 +124,7 @@ def api_response(status_code, body):
     return {
         "statusCode": status_code,
         "headers": headers,
-        "body": json.dumps(body, default=_json_default),
+        "body": json.dumps(body, default=_json_default, ensure_ascii=False),
     }
 
 
@@ -125,6 +138,19 @@ def _safe_float(value, default=0.0):
         return out
     except (ValueError, TypeError):
         return default
+
+
+def _coerce_bool(value, default=None):
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return default
 
 
 def _get_header(headers, key):
@@ -151,23 +177,25 @@ def _parse_period(period):
     return datetime.now().strftime("%Y-%m")
 
 
-def _normalize_text(value):
-    if value is None:
-        return ""
-    text = str(value).strip().lower()
-    replacements = {
-        "Ä±": "i",
-        "iÌ‡": "i",
-        "ÅŸ": "s",
-        "ÅŸ": "s",
-        "Ã§": "c",
-        "ÄŸ": "g",
-        "Ã¼": "u",
-        "Ã¶": "o",
-    }
-    for src, target in replacements.items():
-        text = text.replace(src, target)
-    return text
+def _period_bounds(period):
+    period = _parse_period(period)
+    year = int(period[:4])
+    month = int(period[5:7])
+    start_date = date(year, month, 1)
+    last_day = calendar.monthrange(year, month)[1]
+    end_date = date(year, month, last_day)
+    return period, start_date, end_date
+
+
+def _resolve_due_date_for_period(period, due_day):
+    period, _, _ = _period_bounds(period)
+    year = int(period[:4])
+    month = int(period[5:7])
+    last_day = calendar.monthrange(year, month)[1]
+    due_day = max(1, min(int(due_day or 1), last_day))
+    return date(year, month, due_day)
+
+
 
 
 def _resolve_category_id(raw_category_id=None, raw_category_name=None, merchant_name=None):
@@ -1238,6 +1266,1086 @@ def handle_subscriptions(user_id, method, body, sub_id):
     finally:
         release_db_connection(conn)
 
+
+def _normalize_goal_status(value, default="active"):
+    allowed = {"active", "completed", "archived"}
+    candidate = str(value or default).strip().lower()
+    return candidate if candidate in allowed else default
+
+
+def _normalize_goal_type(value, default="savings"):
+    allowed = {"savings", "expense_reduction", "income_growth"}
+    candidate = str(value or default).strip().lower()
+    return candidate if candidate in allowed else default
+
+
+def handle_goals(user_id, method, body, goal_id=None):
+    conn = get_db_connection()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            if method == "GET":
+                cur.execute(
+                    """
+                    SELECT id,
+                           title,
+                           target_amount,
+                           current_amount,
+                           target_date,
+                           metric_type,
+                           status,
+                           notes,
+                           created_at,
+                           updated_at,
+                           CASE
+                               WHEN target_amount > 0
+                               THEN ROUND((current_amount / target_amount) * 100, 1)
+                               ELSE 0
+                           END AS progress_pct,
+                           GREATEST(target_amount - current_amount, 0) AS remaining_amount
+                    FROM financial_goals
+                    WHERE user_id = %s
+                      AND status != 'archived'
+                    ORDER BY
+                      CASE WHEN status = 'completed' THEN 1 ELSE 0 END ASC,
+                      target_date NULLS LAST,
+                      created_at DESC
+                    """,
+                    (user_id,),
+                )
+                return api_response(200, {"data": cur.fetchall()})
+
+            if method == "POST":
+                body = body or {}
+                title = str(body.get("title") or "").strip()
+                target_amount = _safe_float(body.get("target_amount"), None)
+                current_amount = _safe_float(body.get("current_amount"), 0.0)
+                target_date = body.get("target_date")
+                metric_type = _normalize_goal_type(body.get("metric_type"))
+                status = _normalize_goal_status(body.get("status"), "active")
+                notes = str(body.get("notes") or "").strip()[:280]
+
+                if not title or target_amount is None or target_amount <= 0:
+                    return api_response(400, {"error": "title and positive target_amount are required"})
+                if current_amount < 0:
+                    return api_response(400, {"error": "current_amount cannot be negative"})
+
+                cur.execute(
+                    """
+                    INSERT INTO financial_goals
+                        (user_id, title, target_amount, current_amount, target_date, metric_type, status, notes)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+                    RETURNING id, title, target_amount, current_amount, target_date, metric_type, status, notes, created_at, updated_at
+                    """,
+                    (user_id, title, target_amount, current_amount, target_date, metric_type, status, notes),
+                )
+                created = cur.fetchone()
+                conn.commit()
+                return api_response(201, created)
+
+            if method == "PUT" and goal_id:
+                body = body or {}
+                cur.execute("SELECT id FROM financial_goals WHERE id=%s AND user_id=%s", (goal_id, user_id))
+                if not cur.fetchone():
+                    return api_response(404, {"error": "Goal not found"})
+
+                title = body.get("title")
+                target_amount = body.get("target_amount")
+                current_amount = body.get("current_amount")
+                target_date = body.get("target_date")
+                metric_type = body.get("metric_type")
+                status = body.get("status")
+                notes = body.get("notes")
+
+                fields = []
+                values = []
+
+                if title is not None:
+                    title = str(title).strip()
+                    if not title:
+                        return api_response(400, {"error": "title cannot be empty"})
+                    fields.append("title=%s")
+                    values.append(title)
+
+                if target_amount is not None:
+                    target_amount = _safe_float(target_amount, None)
+                    if target_amount is None or target_amount <= 0:
+                        return api_response(400, {"error": "target_amount must be positive"})
+                    fields.append("target_amount=%s")
+                    values.append(target_amount)
+
+                if current_amount is not None:
+                    current_amount = _safe_float(current_amount, None)
+                    if current_amount is None or current_amount < 0:
+                        return api_response(400, {"error": "current_amount cannot be negative"})
+                    fields.append("current_amount=%s")
+                    values.append(current_amount)
+
+                if target_date is not None:
+                    fields.append("target_date=%s")
+                    values.append(target_date or None)
+
+                if metric_type is not None:
+                    fields.append("metric_type=%s")
+                    values.append(_normalize_goal_type(metric_type))
+
+                if status is not None:
+                    fields.append("status=%s")
+                    values.append(_normalize_goal_status(status))
+
+                if notes is not None:
+                    fields.append("notes=%s")
+                    values.append(str(notes).strip()[:280])
+
+                if not fields:
+                    return api_response(400, {"error": "No updatable fields provided"})
+
+                fields.append("updated_at=NOW()")
+                values.extend([goal_id, user_id])
+                cur.execute(
+                    f"""
+                    UPDATE financial_goals
+                    SET {', '.join(fields)}
+                    WHERE id=%s AND user_id=%s
+                    RETURNING id, title, target_amount, current_amount, target_date, metric_type, status, notes, created_at, updated_at
+                    """,
+                    tuple(values),
+                )
+                updated = cur.fetchone()
+                conn.commit()
+                return api_response(200, updated)
+
+            if method == "DELETE" and goal_id:
+                cur.execute(
+                    "UPDATE financial_goals SET status='archived', updated_at=NOW() WHERE id=%s AND user_id=%s",
+                    (goal_id, user_id),
+                )
+                conn.commit()
+                return api_response(200, {"message": "Goal archived"})
+
+            return api_response(400, {"error": "Invalid request"})
+    finally:
+        release_db_connection(conn)
+
+
+def handle_insights_overview(user_id, params):
+    params = params or {}
+    period, period_start, period_end = _period_bounds(params.get("month"))
+    days_in_month = (period_end - period_start).days + 1
+    is_current_period = period == datetime.now().strftime("%Y-%m")
+    elapsed_days = datetime.now().day if is_current_period else days_in_month
+    elapsed_days = max(1, min(elapsed_days, days_in_month))
+
+    conn = get_db_connection()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT COUNT(*) AS tx_count,
+                       COALESCE(SUM(total_amount), 0) AS total_spent
+                FROM receipts
+                WHERE user_id=%s
+                  AND status != 'deleted'
+                  AND receipt_date BETWEEN %s AND %s
+                """,
+                (user_id, period_start, period_end),
+            )
+            spending_row = cur.fetchone() or {"tx_count": 0, "total_spent": 0}
+
+            cur.execute(
+                """
+                SELECT COALESCE(SUM(amount), 0) AS total_income
+                FROM incomes
+                WHERE user_id=%s
+                  AND income_date BETWEEN %s AND %s
+                """,
+                (user_id, period_start, period_end),
+            )
+            income_row = cur.fetchone() or {"total_income": 0}
+
+            cur.execute(
+                """
+                SELECT COALESCE(SUM(amount), 0) AS total_subscriptions
+                FROM subscriptions
+                WHERE user_id=%s
+                """,
+                (user_id,),
+            )
+            sub_row = cur.fetchone() or {"total_subscriptions": 0}
+
+            cur.execute(
+                """
+                SELECT COALESCE(SUM(amount), 0) AS total_fixed
+                FROM fixed_expense_items
+                WHERE user_id=%s AND is_active=TRUE
+                """,
+                (user_id,),
+            )
+            fixed_row = cur.fetchone() or {"total_fixed": 0}
+
+            cur.execute("SELECT category_name, amount FROM budgets WHERE user_id=%s", (user_id,))
+            budgets = cur.fetchall() or []
+
+            cur.execute(
+                """
+                SELECT category_id, COALESCE(SUM(total_amount),0) AS spent
+                FROM receipts
+                WHERE user_id=%s
+                  AND status != 'deleted'
+                  AND receipt_date BETWEEN %s AND %s
+                GROUP BY category_id
+                """,
+                (user_id, period_start, period_end),
+            )
+            spent_rows = cur.fetchall() or []
+            spent_by_category = {
+                CATEGORIES.get(r.get("category_id"), "Diger").lower(): _safe_float(r.get("spent"))
+                for r in spent_rows
+            }
+
+            budgets_count = len(budgets)
+            met_count = 0
+            for b in budgets:
+                category = str(b.get("category_name") or "").strip().lower()
+                limit_amount = _safe_float(b.get("amount"), 0.0)
+                spent_amount = spent_by_category.get(category, 0.0)
+                if limit_amount > 0 and spent_amount <= limit_amount:
+                    met_count += 1
+
+            cur.execute(
+                """
+                SELECT category_id, COALESCE(SUM(total_amount),0) AS total
+                FROM receipts
+                WHERE user_id=%s
+                  AND status != 'deleted'
+                  AND receipt_date BETWEEN %s AND %s
+                GROUP BY category_id
+                ORDER BY total DESC
+                LIMIT 4
+                """,
+                (user_id, period_start, period_end),
+            )
+            top_rows = cur.fetchall() or []
+
+            cur.execute(
+                """
+                SELECT COUNT(*) FILTER (WHERE status='active') AS active_count,
+                       COUNT(*) FILTER (WHERE status='completed') AS completed_count,
+                       COALESCE(SUM(target_amount) FILTER (WHERE status='active'), 0) AS active_target_total,
+                       COALESCE(SUM(current_amount) FILTER (WHERE status='active'), 0) AS active_current_total
+                FROM financial_goals
+                WHERE user_id=%s
+                """,
+                (user_id,),
+            )
+            goals_row = cur.fetchone() or {}
+
+            cur.execute(
+                """
+                SELECT id, title, target_date, target_amount, current_amount, status
+                FROM financial_goals
+                WHERE user_id=%s
+                  AND status='active'
+                  AND target_date IS NOT NULL
+                  AND target_date BETWEEN CURRENT_DATE AND (CURRENT_DATE + INTERVAL '14 days')
+                ORDER BY target_date ASC
+                LIMIT 5
+                """,
+                (user_id,),
+            )
+            goals_due_soon = cur.fetchall() or []
+
+            total_spent = round(_safe_float(spending_row.get("total_spent")), 2)
+            total_income = round(_safe_float(income_row.get("total_income")), 2)
+            tx_count = int(spending_row.get("tx_count") or 0)
+            total_subscriptions = round(_safe_float(sub_row.get("total_subscriptions")), 2)
+            total_fixed = round(_safe_float(fixed_row.get("total_fixed")), 2)
+            net_balance = round(total_income - total_spent, 2)
+            savings_rate = round(((total_income - total_spent) / total_income) * 100, 1) if total_income > 0 else 0.0
+            subscription_share = round((total_subscriptions / total_spent) * 100, 1) if total_spent > 0 else 0.0
+            fixed_share = round((total_fixed / total_spent) * 100, 1) if total_spent > 0 else 0.0
+            budget_adherence = round((met_count / budgets_count) * 100, 1) if budgets_count > 0 else 0.0
+            daily_burn = round(total_spent / elapsed_days, 2)
+            projected_month_end = round(daily_burn * days_in_month, 2)
+
+            recommendations = []
+            if total_income > 0 and savings_rate < 10:
+                recommendations.append("Tasarruf oranını %10 üzerine çıkarmak için yüksek harcama kategorinde mikro limit uygula.")
+            if budgets_count > 0 and budget_adherence < 70:
+                recommendations.append("Bütçe hedeflerinin çoğu aşılmış görünüyor; aylık limitleri güncelle ve kritik kategoriye uyarı koy.")
+            if subscription_share > 20:
+                recommendations.append("Abonelik giderlerinin toplam harcamadaki payı yüksek; kullanmadığın abonelikleri iptal et.")
+            if fixed_share > 60:
+                recommendations.append("Sabit gider oranı çok yüksek; pazarlık yapılabilir kalemleri yeniden fiyatlandır.")
+            if int(goals_row.get("active_count") or 0) == 0:
+                recommendations.append("En az bir aktif finansal hedef ekleyerek AI analizini kişiselleştir.")
+
+            top_categories = [
+                {
+                    "name": CATEGORIES.get(r.get("category_id"), "Diger"),
+                    "total": round(_safe_float(r.get("total")), 2),
+                }
+                for r in top_rows
+            ]
+
+            goal_progress_pct = 0.0
+            active_target_total = _safe_float(goals_row.get("active_target_total"), 0.0)
+            active_current_total = _safe_float(goals_row.get("active_current_total"), 0.0)
+            if active_target_total > 0:
+                goal_progress_pct = round((active_current_total / active_target_total) * 100, 1)
+
+            return api_response(
+                200,
+                {
+                    "period": period,
+                    "financial_health": {
+                        "total_spent": total_spent,
+                        "total_income": total_income,
+                        "net_balance": net_balance,
+                        "savings_rate": savings_rate,
+                        "daily_burn": daily_burn,
+                        "projected_month_end_spend": projected_month_end,
+                        "transactions_count": tx_count,
+                    },
+                    "structure": {
+                        "subscription_total": total_subscriptions,
+                        "subscription_share": subscription_share,
+                        "fixed_expense_total": total_fixed,
+                        "fixed_expense_share": fixed_share,
+                        "budget_adherence": budget_adherence,
+                        "budgets_met": met_count,
+                        "budgets_total": budgets_count,
+                        "top_categories": top_categories,
+                    },
+                    "goals": {
+                        "active_count": int(goals_row.get("active_count") or 0),
+                        "completed_count": int(goals_row.get("completed_count") or 0),
+                        "active_target_total": round(active_target_total, 2),
+                        "active_current_total": round(active_current_total, 2),
+                        "active_progress_pct": goal_progress_pct,
+                        "due_soon": goals_due_soon,
+                    },
+                    "recommendations": recommendations[:5],
+                    "meta": {
+                        "generated_at": datetime.utcnow().isoformat() + "Z",
+                        "days_in_month": days_in_month,
+                        "elapsed_days": elapsed_days,
+                    },
+                },
+            )
+    finally:
+        release_db_connection(conn)
+
+
+def _normalize_action_status(value, default="pending"):
+    allowed = {"pending", "done", "dismissed"}
+    candidate = str(value or default).strip().lower()
+    return candidate if candidate in allowed else default
+
+
+def _normalize_action_priority(value, default="MEDIUM"):
+    allowed = {"HIGH", "MEDIUM", "LOW"}
+    candidate = str(value or default).strip().upper()
+    return candidate if candidate in allowed else default
+
+
+def handle_ai_actions(user_id, method, body, action_id=None, params=None):
+    body = body or {}
+    params = params or {}
+    period = _parse_period((body or {}).get("month") or (params or {}).get("month"))
+
+    conn = get_db_connection()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            if method == "GET":
+                cur.execute(
+                    """
+                    SELECT id, related_period, title, source_insight, priority, status, due_date, done_at, created_at, updated_at
+                    FROM ai_action_items
+                    WHERE user_id=%s AND related_period=%s
+                    ORDER BY
+                      CASE status WHEN 'pending' THEN 0 WHEN 'done' THEN 1 ELSE 2 END,
+                      priority DESC,
+                      due_date NULLS LAST,
+                      created_at DESC
+                    """,
+                    (user_id, period),
+                )
+                rows = cur.fetchall() or []
+                done_count = len([r for r in rows if str(r.get("status")) == "done"])
+                return api_response(
+                    200,
+                    {
+                        "month": period,
+                        "data": rows,
+                        "stats": {
+                            "total": len(rows),
+                            "done": done_count,
+                            "pending": len(rows) - done_count,
+                        },
+                    },
+                )
+
+            if method == "POST":
+                actions = body.get("actions")
+                if not isinstance(actions, list):
+                    title = str(body.get("title") or "").strip()
+                    if not title:
+                        return api_response(400, {"error": "actions list or title is required"})
+                    actions = [
+                        {
+                            "title": title,
+                            "priority": body.get("priority", "MEDIUM"),
+                            "source_insight": body.get("source_insight"),
+                            "due_in_days": body.get("due_in_days"),
+                        }
+                    ]
+
+                inserted = 0
+                for action in actions[:50]:
+                    title = str(action.get("title") or "").strip()
+                    if not title:
+                        continue
+                    source_insight = str(action.get("source_insight") or "").strip()[:64]
+                    priority = _normalize_action_priority(action.get("priority"), "MEDIUM")
+                    due_in_days = int(_safe_float(action.get("due_in_days"), 0))
+                    due_date = date.today() + timedelta(days=max(0, min(due_in_days, 90))) if due_in_days > 0 else None
+
+                    cur.execute(
+                        """
+                        INSERT INTO ai_action_items (user_id, related_period, title, source_insight, priority, status, due_date)
+                        VALUES (%s,%s,%s,%s,%s,'pending',%s)
+                        ON CONFLICT (user_id, related_period, title)
+                        DO UPDATE SET
+                          priority = EXCLUDED.priority,
+                          source_insight = COALESCE(NULLIF(EXCLUDED.source_insight, ''), ai_action_items.source_insight),
+                          due_date = COALESCE(EXCLUDED.due_date, ai_action_items.due_date),
+                          updated_at = NOW()
+                        """,
+                        (user_id, period, title[:180], source_insight, priority, due_date),
+                    )
+                    inserted += 1
+
+                conn.commit()
+                return api_response(200, {"message": "Actions synced", "processed": inserted, "month": period})
+
+            if method in {"PUT", "PATCH"} and action_id:
+                status = _normalize_action_status(body.get("status"), None)
+                if not status:
+                    return api_response(400, {"error": "status is required"})
+
+                done_at = datetime.utcnow() if status == "done" else None
+                cur.execute(
+                    """
+                    UPDATE ai_action_items
+                    SET status=%s,
+                        done_at=%s,
+                        updated_at=NOW()
+                    WHERE id=%s AND user_id=%s
+                    RETURNING id, related_period, title, source_insight, priority, status, due_date, done_at, updated_at
+                    """,
+                    (status, done_at, action_id, user_id),
+                )
+                updated = cur.fetchone()
+                if not updated:
+                    return api_response(404, {"error": "Action not found"})
+                conn.commit()
+                return api_response(200, updated)
+
+            if method == "DELETE" and action_id:
+                cur.execute("DELETE FROM ai_action_items WHERE id=%s AND user_id=%s", (action_id, user_id))
+                conn.commit()
+                return api_response(200, {"message": "Deleted"})
+
+            return api_response(400, {"error": "Invalid request"})
+    finally:
+        release_db_connection(conn)
+
+
+def handle_insights_what_if(user_id, params):
+    params = params or {}
+    period, period_start, period_end = _period_bounds(params.get("month"))
+    raw_category = str(params.get("category") or "").strip().lower()
+    cut_percent = max(0.0, min(_safe_float(params.get("cut_percent"), 10.0), 90.0))
+
+    conn = get_db_connection()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT category_id, COALESCE(SUM(total_amount),0) AS total
+                FROM receipts
+                WHERE user_id=%s
+                  AND status != 'deleted'
+                  AND receipt_date BETWEEN %s AND %s
+                GROUP BY category_id
+                ORDER BY total DESC
+                """,
+                (user_id, period_start, period_end),
+            )
+            category_rows = cur.fetchall() or []
+
+            cur.execute(
+                """
+                SELECT COALESCE(SUM(total_amount), 0) AS total_spent
+                FROM receipts
+                WHERE user_id=%s
+                  AND status != 'deleted'
+                  AND receipt_date BETWEEN %s AND %s
+                """,
+                (user_id, period_start, period_end),
+            )
+            total_spent = _safe_float((cur.fetchone() or {}).get("total_spent"), 0.0)
+
+            cur.execute(
+                """
+                SELECT COALESCE(SUM(amount), 0) AS total_income
+                FROM incomes
+                WHERE user_id=%s
+                  AND income_date BETWEEN %s AND %s
+                """,
+                (user_id, period_start, period_end),
+            )
+            total_income = _safe_float((cur.fetchone() or {}).get("total_income"), 0.0)
+
+            if not category_rows:
+                return api_response(
+                    200,
+                    {
+                        "month": period,
+                        "scenario": None,
+                        "summary": "No spending data for selected month",
+                    },
+                )
+
+            selected = None
+            if raw_category:
+                for row in category_rows:
+                    name = CATEGORIES.get(row.get("category_id"), "Diger")
+                    if _normalize_text(name) == _normalize_text(raw_category):
+                        selected = row
+                        break
+            if selected is None:
+                selected = category_rows[0]
+
+            category_name = CATEGORIES.get(selected.get("category_id"), "Diger")
+            category_total = _safe_float(selected.get("total"), 0.0)
+            estimated_saving = round(category_total * (cut_percent / 100.0), 2)
+            projected_spent = round(max(total_spent - estimated_saving, 0.0), 2)
+            current_savings_rate = round(((total_income - total_spent) / total_income) * 100, 1) if total_income > 0 else 0.0
+            projected_savings_rate = round(((total_income - projected_spent) / total_income) * 100, 1) if total_income > 0 else current_savings_rate
+
+            return api_response(
+                200,
+                {
+                    "month": period,
+                    "scenario": {
+                        "category": category_name,
+                        "cut_percent": round(cut_percent, 1),
+                        "category_total": round(category_total, 2),
+                        "estimated_saving": estimated_saving,
+                        "current_total_spent": round(total_spent, 2),
+                        "projected_total_spent": projected_spent,
+                        "current_savings_rate": current_savings_rate,
+                        "projected_savings_rate": projected_savings_rate,
+                    },
+                    "available_categories": [
+                        {
+                            "name": CATEGORIES.get(r.get("category_id"), "Diger"),
+                            "total": round(_safe_float(r.get("total")), 2),
+                        }
+                        for r in category_rows[:8]
+                    ],
+                },
+            )
+    finally:
+        release_db_connection(conn)
+
+
+def _fixed_expense_status(month_payment, due_date, period):
+    if month_payment:
+        status = str(month_payment.get("status") or "").strip().lower()
+        if status in {"paid", "pending"}:
+            return status
+    if due_date < date.today() and period == datetime.now().strftime("%Y-%m"):
+        return "overdue"
+    return "pending"
+
+
+def handle_fixed_expenses_get(user_id, params):
+    params = params or {}
+    period, period_start, period_end = _period_bounds(params.get("month"))
+
+    conn = get_db_connection()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT g.id AS group_id,
+                       g.title,
+                       g.category_type,
+                       g.created_at AS group_created_at,
+                       i.id AS item_id,
+                       i.name AS item_name,
+                       i.amount AS item_amount,
+                       i.due_day,
+                       i.created_at AS item_created_at
+                FROM fixed_expense_groups g
+                LEFT JOIN fixed_expense_items i
+                       ON i.group_id = g.id
+                      AND i.is_active = TRUE
+                WHERE g.user_id = %s
+                  AND g.is_active = TRUE
+                ORDER BY g.created_at DESC, i.due_day ASC, i.created_at ASC
+                """,
+                (user_id,),
+            )
+            rows = cur.fetchall()
+
+            if not rows:
+                return api_response(
+                    200,
+                    {
+                        "month": period,
+                        "stats": {"total": 0, "paid": 0, "remaining": 0, "count": 0, "pending_count": 0},
+                        "data": [],
+                    },
+                )
+
+            item_ids = [str(r["item_id"]) for r in rows if r.get("item_id")]
+
+            month_payments = {}
+            if item_ids:
+                cur.execute(
+                    """
+                    SELECT id, item_id, payment_date, amount, status, note, source, created_at, updated_at
+                    FROM fixed_expense_payments
+                    WHERE user_id=%s
+                      AND item_id = ANY(%s::uuid[])
+                      AND payment_date >= %s
+                      AND payment_date <= %s
+                    ORDER BY payment_date DESC, created_at DESC
+                    """,
+                    (user_id, item_ids, period_start, period_end),
+                )
+                for pay in cur.fetchall():
+                    key = str(pay["item_id"])
+                    if key not in month_payments:
+                        month_payments[key] = pay
+
+            history_map = {}
+            if item_ids:
+                cur.execute(
+                    """
+                    SELECT id, item_id, payment_date, amount, status
+                    FROM (
+                        SELECT id, item_id, payment_date, amount, status, created_at,
+                               ROW_NUMBER() OVER (
+                                   PARTITION BY item_id
+                                   ORDER BY payment_date DESC, created_at DESC
+                               ) AS rn
+                        FROM fixed_expense_payments
+                        WHERE user_id=%s
+                          AND item_id = ANY(%s::uuid[])
+                    ) ranked
+                    WHERE rn <= 6
+                    ORDER BY item_id, payment_date DESC
+                    """,
+                    (user_id, item_ids),
+                )
+                for row in cur.fetchall():
+                    key = str(row["item_id"])
+                    history_map.setdefault(key, []).append(
+                        {
+                            "id": row["id"],
+                            "date": row["payment_date"],
+                            "amount": _safe_float(row["amount"]),
+                            "status": row["status"],
+                        }
+                    )
+
+            group_map = {}
+            for row in rows:
+                gid = str(row["group_id"])
+                if gid not in group_map:
+                    group_map[gid] = {
+                        "id": row["group_id"],
+                        "title": row["title"],
+                        "category_type": row["category_type"] or "Diger",
+                        "items": [],
+                    }
+
+                if not row.get("item_id"):
+                    continue
+
+                item_id = str(row["item_id"])
+                due_day = int(row.get("due_day") or 1)
+                due_date = _resolve_due_date_for_period(period, due_day)
+                month_payment = month_payments.get(item_id)
+                status = _fixed_expense_status(month_payment, due_date, period)
+                amount = _safe_float(row.get("item_amount"), 0.0)
+
+                group_map[gid]["items"].append(
+                    {
+                        "id": row["item_id"],
+                        "name": row["item_name"] or "Gider",
+                        "amount": amount,
+                        "day": due_day,
+                        "due_date": due_date.isoformat(),
+                        "status": status,
+                        "month_payment": {
+                            "id": (month_payment or {}).get("id"),
+                            "payment_date": (month_payment or {}).get("payment_date"),
+                            "amount": _safe_float((month_payment or {}).get("amount"), 0.0),
+                            "status": (month_payment or {}).get("status"),
+                        } if month_payment else None,
+                        "history": history_map.get(item_id, []),
+                    }
+                )
+
+            groups = list(group_map.values())
+
+            total = 0.0
+            paid = 0.0
+            count = 0
+            pending_count = 0
+            for group in groups:
+                group_total = 0.0
+                for item in group["items"]:
+                    count += 1
+                    group_total += _safe_float(item["amount"], 0.0)
+                    total += _safe_float(item["amount"], 0.0)
+                    if item["status"] == "paid":
+                        paid += _safe_float(item["amount"], 0.0)
+                    else:
+                        pending_count += 1
+                group["total_amount"] = round(group_total, 2)
+
+            return api_response(
+                200,
+                {
+                    "month": period,
+                    "stats": {
+                        "total": round(total, 2),
+                        "paid": round(paid, 2),
+                        "remaining": round(max(total - paid, 0), 2),
+                        "count": count,
+                        "pending_count": pending_count,
+                    },
+                    "data": groups,
+                },
+            )
+    finally:
+        release_db_connection(conn)
+
+
+def handle_fixed_expense_group_create(user_id, body):
+    body = body or {}
+    title = str(body.get("title") or "").strip()
+    category_type = str(body.get("category_type") or "Diger").strip()[:80]
+
+    if not title:
+        return api_response(400, {"error": "title is required"})
+
+    conn = get_db_connection()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                INSERT INTO fixed_expense_groups (user_id, title, category_type)
+                VALUES (%s,%s,%s)
+                RETURNING id, title, category_type, created_at, updated_at
+                """,
+                (user_id, title[:150], category_type),
+            )
+            created = cur.fetchone()
+            conn.commit()
+            return api_response(201, created)
+    finally:
+        release_db_connection(conn)
+
+
+def handle_fixed_expense_group_update(user_id, group_id, body):
+    body = body or {}
+    updates = []
+    values = []
+
+    if body.get("title") is not None:
+        title = str(body.get("title") or "").strip()
+        if not title:
+            return api_response(400, {"error": "title cannot be empty"})
+        updates.append("title=%s")
+        values.append(title[:150])
+
+    if body.get("category_type") is not None:
+        updates.append("category_type=%s")
+        values.append(str(body.get("category_type") or "Diger").strip()[:80])
+
+    if body.get("is_active") is not None:
+        is_active = _coerce_bool(body.get("is_active"), None)
+        if is_active is None:
+            return api_response(400, {"error": "is_active must be boolean"})
+        updates.append("is_active=%s")
+        values.append(is_active)
+
+    if not updates:
+        return api_response(400, {"error": "No valid fields to update"})
+
+    updates.append("updated_at=NOW()")
+    values.extend([group_id, user_id])
+
+    conn = get_db_connection()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                f"""
+                UPDATE fixed_expense_groups
+                SET {", ".join(updates)}
+                WHERE id=%s AND user_id=%s
+                RETURNING id, title, category_type, is_active, created_at, updated_at
+                """,
+                values,
+            )
+            updated = cur.fetchone()
+            if not updated:
+                return api_response(404, {"error": "Group not found"})
+            conn.commit()
+            return api_response(200, updated)
+    finally:
+        release_db_connection(conn)
+
+
+def handle_fixed_expense_group_delete(user_id, group_id):
+    conn = get_db_connection()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                UPDATE fixed_expense_groups
+                SET is_active=FALSE, updated_at=NOW()
+                WHERE id=%s AND user_id=%s
+                RETURNING id
+                """,
+                (group_id, user_id),
+            )
+            group = cur.fetchone()
+            if not group:
+                return api_response(404, {"error": "Group not found"})
+
+            cur.execute(
+                """
+                UPDATE fixed_expense_items
+                SET is_active=FALSE, updated_at=NOW()
+                WHERE group_id=%s AND user_id=%s
+                """,
+                (group_id, user_id),
+            )
+            conn.commit()
+            return api_response(200, {"message": "Deleted"})
+    finally:
+        release_db_connection(conn)
+
+
+def handle_fixed_expense_item_create(user_id, body):
+    body = body or {}
+    group_id = body.get("group_id")
+    name = str(body.get("name") or "").strip()
+    amount = _safe_float(body.get("amount"), None)
+    due_day = body.get("day")
+
+    if not group_id or not name or amount is None:
+        return api_response(400, {"error": "group_id, name and amount are required"})
+    if amount <= 0:
+        return api_response(400, {"error": "amount must be greater than 0"})
+
+    try:
+        due_day = int(due_day)
+        if due_day < 1 or due_day > 31:
+            raise ValueError()
+    except Exception:
+        return api_response(400, {"error": "day must be between 1 and 31"})
+
+    conn = get_db_connection()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT id
+                FROM fixed_expense_groups
+                WHERE id=%s AND user_id=%s AND is_active=TRUE
+                """,
+                (group_id, user_id),
+            )
+            if not cur.fetchone():
+                return api_response(404, {"error": "Group not found"})
+
+            cur.execute(
+                """
+                INSERT INTO fixed_expense_items (group_id, user_id, name, amount, due_day)
+                VALUES (%s,%s,%s,%s,%s)
+                RETURNING id, group_id, name, amount, due_day, created_at, updated_at
+                """,
+                (group_id, user_id, name[:150], amount, due_day),
+            )
+            created = cur.fetchone()
+            conn.commit()
+            return api_response(201, created)
+    finally:
+        release_db_connection(conn)
+
+
+def handle_fixed_expense_item_update(user_id, item_id, body):
+    body = body or {}
+    updates = []
+    values = []
+
+    if body.get("name") is not None:
+        name = str(body.get("name") or "").strip()
+        if not name:
+            return api_response(400, {"error": "name cannot be empty"})
+        updates.append("name=%s")
+        values.append(name[:150])
+
+    if body.get("amount") is not None:
+        amount = _safe_float(body.get("amount"), None)
+        if amount is None or amount <= 0:
+            return api_response(400, {"error": "amount must be greater than 0"})
+        updates.append("amount=%s")
+        values.append(amount)
+
+    if body.get("day") is not None:
+        try:
+            due_day = int(body.get("day"))
+            if due_day < 1 or due_day > 31:
+                raise ValueError()
+            updates.append("due_day=%s")
+            values.append(due_day)
+        except Exception:
+            return api_response(400, {"error": "day must be between 1 and 31"})
+
+    if body.get("is_active") is not None:
+        is_active = _coerce_bool(body.get("is_active"), None)
+        if is_active is None:
+            return api_response(400, {"error": "is_active must be boolean"})
+        updates.append("is_active=%s")
+        values.append(is_active)
+
+    if not updates:
+        return api_response(400, {"error": "No valid fields to update"})
+
+    updates.append("updated_at=NOW()")
+    values.extend([item_id, user_id])
+
+    conn = get_db_connection()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                f"""
+                UPDATE fixed_expense_items
+                SET {", ".join(updates)}
+                WHERE id=%s AND user_id=%s
+                RETURNING id, group_id, name, amount, due_day, is_active, created_at, updated_at
+                """,
+                values,
+            )
+            updated = cur.fetchone()
+            if not updated:
+                return api_response(404, {"error": "Item not found"})
+            conn.commit()
+            return api_response(200, updated)
+    finally:
+        release_db_connection(conn)
+
+
+def handle_fixed_expense_item_delete(user_id, item_id):
+    conn = get_db_connection()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                UPDATE fixed_expense_items
+                SET is_active=FALSE, updated_at=NOW()
+                WHERE id=%s AND user_id=%s
+                RETURNING id
+                """,
+                (item_id, user_id),
+            )
+            row = cur.fetchone()
+            if not row:
+                return api_response(404, {"error": "Item not found"})
+            conn.commit()
+            return api_response(200, {"message": "Deleted"})
+    finally:
+        release_db_connection(conn)
+
+
+def handle_fixed_expense_payment_upsert(user_id, item_id, body):
+    body = body or {}
+    status = str(body.get("status") or "paid").strip().lower()
+    if status not in {"paid", "pending"}:
+        return api_response(400, {"error": "status must be paid or pending"})
+
+    month = body.get("month")
+    payment_date_raw = body.get("payment_date")
+    note = re.sub(r"\s+", " ", str(body.get("note") or "")).strip()[:280]
+    source = str(body.get("source") or "manual").strip()[:40]
+
+    conn = get_db_connection()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT i.id, i.amount, i.due_day
+                FROM fixed_expense_items i
+                JOIN fixed_expense_groups g ON g.id=i.group_id
+                WHERE i.id=%s
+                  AND i.user_id=%s
+                  AND i.is_active=TRUE
+                  AND g.is_active=TRUE
+                """,
+                (item_id, user_id),
+            )
+            item = cur.fetchone()
+            if not item:
+                return api_response(404, {"error": "Item not found"})
+
+            if payment_date_raw:
+                try:
+                    payment_date = datetime.strptime(str(payment_date_raw), "%Y-%m-%d").date()
+                except Exception:
+                    return api_response(400, {"error": "payment_date must be YYYY-MM-DD"})
+            elif month:
+                payment_date = _resolve_due_date_for_period(month, item.get("due_day") or 1)
+            else:
+                payment_date = date.today()
+
+            amount = _safe_float(body.get("amount"), _safe_float(item.get("amount"), 0.0))
+            if amount <= 0:
+                return api_response(400, {"error": "amount must be greater than 0"})
+
+            cur.execute(
+                """
+                INSERT INTO fixed_expense_payments (
+                    item_id, user_id, payment_date, amount, status, note, source
+                )
+                VALUES (%s,%s,%s,%s,%s,%s,%s)
+                ON CONFLICT (item_id, payment_date)
+                DO UPDATE SET
+                    amount=EXCLUDED.amount,
+                    status=EXCLUDED.status,
+                    note=EXCLUDED.note,
+                    source=EXCLUDED.source,
+                    updated_at=NOW()
+                RETURNING id, item_id, payment_date, amount, status, note, source, created_at, updated_at
+                """,
+                (item_id, user_id, payment_date, amount, status, note, source),
+            )
+            payment = cur.fetchone()
+            conn.commit()
+            return api_response(200, payment)
+    finally:
+        release_db_connection(conn)
+
+
 def _compute_data_signature(total_amount, receipt_count, last_upd):
     raw = f"{_safe_float(total_amount)}-{int(receipt_count)}-{last_upd}"
     return hashlib.md5(raw.encode("utf-8")).hexdigest()
@@ -1459,11 +2567,43 @@ def handle_ai_analyze(user_id, body):
             cur.execute("SELECT name, amount FROM subscriptions WHERE user_id=%s", (user_id,))
             subscriptions = cur.fetchall()
 
+            cur.execute(
+                """
+                SELECT COALESCE(SUM(amount), 0) AS total
+                FROM incomes
+                WHERE user_id=%s AND TO_CHAR(income_date, 'YYYY-MM')=%s
+                """,
+                (user_id, period),
+            )
+            income_total = _safe_float((cur.fetchone() or {}).get("total"), 0.0)
+
+            cur.execute(
+                """
+                SELECT id, title, target_amount, current_amount, target_date, metric_type, status
+                FROM financial_goals
+                WHERE user_id=%s AND status='active'
+                ORDER BY target_date NULLS LAST, created_at DESC
+                LIMIT 30
+                """,
+                (user_id,),
+            )
+            goals = cur.fetchall()
+
+            spent_total = _safe_float(sig_row.get("total"), 0.0)
+            savings_rate = ((income_total - spent_total) / income_total * 100) if income_total > 0 else 0.0
+
             payload = {
                 "transactions": txs,
                 "monthlyTotals": monthly,
                 "budgets": budgets,
                 "subscriptions": subscriptions,
+                "goals": goals,
+                "financialHealth": {
+                    "period_income": round(income_total, 2),
+                    "period_spent": round(spent_total, 2),
+                    "period_net": round(income_total - spent_total, 2),
+                    "savings_rate": round(savings_rate, 1),
+                },
                 "period": period,
                 "categoryMap": {str(k): v for k, v in CATEGORIES.items()},
                 "skipLLM": skip_llm,
@@ -1554,11 +2694,11 @@ def handle_smart_extract(user_id, body):
     prompt = (
         f"Date:{today}; Input:{normalized_text}; Cats:{cat_list},Diğer. "
         "Return ONLY valid JSON with merchant_name,total_amount,receipt_date(YYYY-MM-DD),"
-        "category_name,description. No markdown."
+        "category_name,description. Use correct Turkish characters (ğ, ü, ş, ı, ö, ç). No markdown."
     )
 
     try:
-        bedrock = boto3.client(service_name="bedrock-runtime", region_name="us-east-1")
+        bedrock = boto3.client(service_name="bedrock-runtime", region_name=AWS_REGION)
         
         response = bedrock.converse(
             modelId=BEDROCK_MODEL_ID,
@@ -1705,6 +2845,23 @@ def handle_dashboard(user_id):
             cur.execute("SELECT name, amount, next_payment_date FROM subscriptions WHERE user_id=%s ORDER BY next_payment_date ASC LIMIT 3", (user_id,))
             subscriptions = cur.fetchall()
 
+            cur.execute(
+                """
+                SELECT COUNT(*) FILTER (WHERE status='active') AS active_count,
+                       COUNT(*) FILTER (WHERE status='completed') AS completed_count,
+                       COALESCE(SUM(target_amount) FILTER (WHERE status='active'), 0) AS active_target_total,
+                       COALESCE(SUM(current_amount) FILTER (WHERE status='active'), 0) AS active_current_total
+                FROM financial_goals
+                WHERE user_id=%s
+                """,
+                (user_id,),
+            )
+            goals = cur.fetchone() or {}
+
+            active_target_total = _safe_float(goals.get("active_target_total"), 0.0)
+            active_current_total = _safe_float(goals.get("active_current_total"), 0.0)
+            goal_progress_pct = round((active_current_total / active_target_total) * 100, 1) if active_target_total > 0 else 0.0
+
             return api_response(
                 200,
                 {
@@ -1717,6 +2874,13 @@ def handle_dashboard(user_id):
                     "categories": categories,
                     "budgets": budgets,
                     "subscriptions": subscriptions,
+                    "goals_summary": {
+                        "active_count": int(goals.get("active_count") or 0),
+                        "completed_count": int(goals.get("completed_count") or 0),
+                        "active_target_total": round(active_target_total, 2),
+                        "active_current_total": round(active_current_total, 2),
+                        "active_progress_pct": goal_progress_pct,
+                    },
                     "currency": "TRY",
                     "is_stale": is_stale,
                     "saved_analysis": saved_analysis,
@@ -2242,31 +3406,225 @@ def handle_reports_ai_feedback(user_id, body):
 
 
 def ensure_tables_exist():
-    """Checks and creates necessary tables if they don't exist."""
+    """Creates core tables for non-production bootstrap environments."""
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
-            # Create INCOMES table
+            cur.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto;")
+
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS user_data (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    cognito_sub VARCHAR(255) UNIQUE NOT NULL,
+                    email VARCHAR(255) UNIQUE NOT NULL,
+                    full_name VARCHAR(255),
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                );
+                """
+            )
+
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS refresh_tokens (
+                    id BIGSERIAL PRIMARY KEY,
+                    user_id UUID NOT NULL REFERENCES user_data(id) ON DELETE CASCADE,
+                    token_hash VARCHAR(255) NOT NULL,
+                    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                );
+                """
+            )
+
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS receipts (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    user_id UUID NOT NULL REFERENCES user_data(id) ON DELETE CASCADE,
+                    file_url TEXT NOT NULL,
+                    status VARCHAR(50) NOT NULL DEFAULT 'pending',
+                    merchant_name VARCHAR(255),
+                    receipt_date DATE,
+                    total_amount DECIMAL(12, 2) DEFAULT 0.00,
+                    currency VARCHAR(10) DEFAULT 'TRY',
+                    tax_amount DECIMAL(12, 2) DEFAULT 0.00,
+                    category_id INTEGER,
+                    last_error TEXT,
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                );
+                """
+            )
+
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS receipt_items (
+                    id BIGSERIAL PRIMARY KEY,
+                    receipt_id UUID NOT NULL REFERENCES receipts(id) ON DELETE CASCADE,
+                    item_name VARCHAR(255),
+                    quantity INTEGER DEFAULT 1,
+                    unit_price DECIMAL(10, 2),
+                    total_price DECIMAL(10, 2)
+                );
+                """
+            )
+
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS budgets (
+                    id BIGSERIAL PRIMARY KEY,
+                    user_id UUID NOT NULL REFERENCES user_data(id) ON DELETE CASCADE,
+                    category_name VARCHAR(100) NOT NULL,
+                    amount DECIMAL(12, 2) NOT NULL,
+                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE (user_id, category_name)
+                );
+                """
+            )
+
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS subscriptions (
+                    id BIGSERIAL PRIMARY KEY,
+                    user_id UUID NOT NULL REFERENCES user_data(id) ON DELETE CASCADE,
+                    name VARCHAR(120) NOT NULL,
+                    amount DECIMAL(12, 2) NOT NULL,
+                    next_payment_date DATE,
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                );
+                """
+            )
+
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS ai_insights (
+                    id BIGSERIAL PRIMARY KEY,
+                    user_id UUID NOT NULL REFERENCES user_data(id) ON DELETE CASCADE,
+                    insight_type VARCHAR(50) NOT NULL,
+                    insight_text JSONB NOT NULL,
+                    priority VARCHAR(20) DEFAULT 'MEDIUM',
+                    related_period VARCHAR(7),
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                );
+                """
+            )
+
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS financial_goals (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    user_id UUID NOT NULL REFERENCES user_data(id) ON DELETE CASCADE,
+                    title VARCHAR(120) NOT NULL,
+                    target_amount DECIMAL(12, 2) NOT NULL,
+                    current_amount DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
+                    target_date DATE,
+                    metric_type VARCHAR(40) NOT NULL DEFAULT 'savings',
+                    status VARCHAR(20) NOT NULL DEFAULT 'active',
+                    notes VARCHAR(280),
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                );
+                """
+            )
+
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS ai_action_items (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    user_id UUID NOT NULL REFERENCES user_data(id) ON DELETE CASCADE,
+                    related_period VARCHAR(7) NOT NULL,
+                    title VARCHAR(180) NOT NULL,
+                    source_insight VARCHAR(64),
+                    priority VARCHAR(20) NOT NULL DEFAULT 'MEDIUM',
+                    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                    due_date DATE,
+                    done_at TIMESTAMP WITH TIME ZONE,
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE (user_id, related_period, title)
+                );
+                """
+            )
+
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS incomes (
-                    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-                    user_id VARCHAR(255) NOT NULL,
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    user_id UUID NOT NULL REFERENCES user_data(id) ON DELETE CASCADE,
                     source VARCHAR(255) NOT NULL,
-                    amount DECIMAL(10, 2) NOT NULL,
+                    amount DECIMAL(12, 2) NOT NULL,
                     income_date DATE NOT NULL DEFAULT CURRENT_DATE,
                     description TEXT,
                     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
                 );
             """)
-            
-            # Create Index for performance
+
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS fixed_expense_groups (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    user_id UUID NOT NULL REFERENCES user_data(id) ON DELETE CASCADE,
+                    title VARCHAR(150) NOT NULL,
+                    category_type VARCHAR(80) DEFAULT 'Diger',
+                    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                );
+                """
+            )
+
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS fixed_expense_items (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    group_id UUID NOT NULL REFERENCES fixed_expense_groups(id) ON DELETE CASCADE,
+                    user_id UUID NOT NULL REFERENCES user_data(id) ON DELETE CASCADE,
+                    name VARCHAR(150) NOT NULL,
+                    amount DECIMAL(12, 2) NOT NULL,
+                    due_day SMALLINT NOT NULL CHECK (due_day BETWEEN 1 AND 31),
+                    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                );
+                """
+            )
+
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS fixed_expense_payments (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    item_id UUID NOT NULL REFERENCES fixed_expense_items(id) ON DELETE CASCADE,
+                    user_id UUID NOT NULL REFERENCES user_data(id) ON DELETE CASCADE,
+                    payment_date DATE NOT NULL,
+                    amount DECIMAL(12, 2) NOT NULL,
+                    status VARCHAR(20) NOT NULL DEFAULT 'paid',
+                    note VARCHAR(280),
+                    source VARCHAR(40) DEFAULT 'manual',
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE (item_id, payment_date)
+                );
+                """
+            )
+
             cur.execute("""
                 CREATE INDEX IF NOT EXISTS idx_incomes_user_date ON incomes(user_id, income_date);
             """)
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON refresh_tokens(user_id, expires_at);")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_receipts_user_date ON receipts(user_id, receipt_date);")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_receipts_status ON receipts(status);")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_budgets_user ON budgets(user_id);")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_subscriptions_user ON subscriptions(user_id, next_payment_date);")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_insights_user_period ON ai_insights(user_id, related_period);")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_goals_user_status ON financial_goals(user_id, status, target_date);")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_ai_actions_user_period ON ai_action_items(user_id, related_period, status);")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_fixed_groups_user ON fixed_expense_groups(user_id, is_active);")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_fixed_items_group ON fixed_expense_items(group_id, is_active);")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_fixed_payments_item_date ON fixed_expense_payments(item_id, payment_date);")
+
             conn.commit()
     except Exception as e:
         logger.error(f"Table creation failed: {e}")
-        # Don't raise, try to continue, maybe table exists but user has no permissions etc.
     finally:
         release_db_connection(conn)
 
@@ -2335,6 +3693,30 @@ def lambda_handler(event, context):
             return handle_upload_init(user_id, body)
         if path == "/receipts/smart-extract" and method == "POST":
             return handle_smart_extract(user_id, body)
+        if path == "/fixed-expenses" and method == "GET":
+            return handle_fixed_expenses_get(user_id, event.get("queryStringParameters") or {})
+        if path == "/fixed-expenses/groups" and method == "POST":
+            return handle_fixed_expense_group_create(user_id, body)
+        if path.startswith("/fixed-expenses/groups/"):
+            parts = path.split("/")
+            group_id = parts[3] if len(parts) > 3 and parts[3] else None
+            if group_id:
+                if method == "PUT":
+                    return handle_fixed_expense_group_update(user_id, group_id, body)
+                if method == "DELETE":
+                    return handle_fixed_expense_group_delete(user_id, group_id)
+        if path == "/fixed-expenses/items" and method == "POST":
+            return handle_fixed_expense_item_create(user_id, body)
+        if path.startswith("/fixed-expenses/items/"):
+            parts = path.split("/")
+            item_id = parts[3] if len(parts) > 3 and parts[3] else None
+            if item_id:
+                if len(parts) > 4 and parts[4] in {"payment", "payments"} and method == "POST":
+                    return handle_fixed_expense_payment_upsert(user_id, item_id, body)
+                if method == "PUT":
+                    return handle_fixed_expense_item_update(user_id, item_id, body)
+                if method == "DELETE":
+                    return handle_fixed_expense_item_delete(user_id, item_id)
         if path == "/budgets":
             if method == "GET":
                 return handle_get_budgets(user_id)
@@ -2344,6 +3726,28 @@ def lambda_handler(event, context):
             parts = path.split("/")
             sub_id = parts[2] if len(parts) > 2 and parts[2] else None
             return handle_subscriptions(user_id, method, body, sub_id)
+        if path == "/goals":
+            if method in {"GET", "POST"}:
+                return handle_goals(user_id, method, body)
+        if path.startswith("/goals/"):
+            parts = path.split("/")
+            goal_id = parts[2] if len(parts) > 2 and parts[2] else None
+            if goal_id and method in {"PUT", "DELETE"}:
+                return handle_goals(user_id, method, body, goal_id)
+        if path == "/insights/overview" and method == "GET":
+            return handle_insights_overview(user_id, event.get("queryStringParameters") or {})
+        if path == "/insights/what-if" and method == "GET":
+            return handle_insights_what_if(user_id, event.get("queryStringParameters") or {})
+        if path == "/ai-actions":
+            if method == "GET":
+                return handle_ai_actions(user_id, method, body, None, event.get("queryStringParameters") or {})
+            if method == "POST":
+                return handle_ai_actions(user_id, method, body, None, event.get("queryStringParameters") or {})
+        if path.startswith("/ai-actions/"):
+            parts = path.split("/")
+            action_id = parts[2] if len(parts) > 2 and parts[2] else None
+            if action_id and method in {"PUT", "PATCH", "DELETE"}:
+                return handle_ai_actions(user_id, method, body, action_id, event.get("queryStringParameters") or {})
         if path == "/export" and method == "GET":
             return handle_export_data(user_id)
         if path == "/reports/summary" and method == "GET":
@@ -2385,3 +3789,5 @@ def lambda_handler(event, context):
     except Exception as exc:
         logger.error(f"FATAL: {exc}", exc_info=True)
         return api_response(500, {"error": "Internal server error"})
+
+

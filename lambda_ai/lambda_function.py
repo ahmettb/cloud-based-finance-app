@@ -1,5 +1,5 @@
-"""
-AI Analysis Lambda — Stateless Financial Intelligence Engine
+﻿"""
+AI Analysis Lambda â€” Stateless Financial Intelligence Engine
 =============================================================
 Bu Lambda, backend API tarafindan invoke edilir.
 DB erisimi YOKTUR. JSON alir, analiz yapar, JSON doner.
@@ -40,7 +40,7 @@ ANOMALY_IQR_FACTOR = float(os.environ.get('ANOMALY_IQR_FACTOR', '1.5'))
 LLM_INPUT_TOKEN_PRICE = float(os.environ.get('LLM_INPUT_TOKEN_PRICE', '0.00000025'))
 LLM_OUTPUT_TOKEN_PRICE = float(os.environ.get('LLM_OUTPUT_TOKEN_PRICE', '0.00000125'))
 
-# ── LAZY BOTO3 INIT (cold start optimization) ──
+# â”€â”€ LAZY BOTO3 INIT (cold start optimization) â”€â”€
 # Client sadece LLM enrichment gerektiginde olusturulur.
 # Bu sayede pure-computation invocation'larda ~800ms cold start kazanici.
 _bedrock_client = None
@@ -52,7 +52,7 @@ def _get_bedrock():
         _bedrock_client = boto3.client('bedrock-runtime', region_name=AWS_REGION)
     return _bedrock_client
 
-# ── CATEGORY MAP ──
+# â”€â”€ CATEGORY MAP â”€â”€
 # Fallback map. Payload'dan 'categoryMap' gelirse o kullanilir.
 DEFAULT_CATEGORIES = {
     1: 'Market', 2: 'Restoran', 3: 'Kafe', 4: 'Online Alisveris',
@@ -64,7 +64,7 @@ DEFAULT_CATEGORIES = {
 # UTILITY HELPERS
 # ============================================================
 def _sf(v, default=0.0):
-    """Safe float conversion — numeric stability"""
+    """Safe float conversion â€” numeric stability"""
     if v is None:
         return default
     try:
@@ -77,13 +77,13 @@ def _sf(v, default=0.0):
 
 
 def _safe_div(a, b, default=0.0):
-    """Safe division — prevents ZeroDivisionError"""
+    """Safe division â€” prevents ZeroDivisionError"""
     b = _sf(b)
     return (_sf(a) / b) if b != 0 else default
 
 
 def _safe_date(date_str):
-    """Safe date parsing — returns None on failure instead of crashing"""
+    """Safe date parsing â€” returns None on failure instead of crashing"""
     if not date_str or not isinstance(date_str, str):
         return None
     for fmt in ('%Y-%m-%d', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%d %H:%M:%S'):
@@ -95,7 +95,7 @@ def _safe_date(date_str):
 
 
 def _uid(prefix='ins'):
-    """Thread-safe unique ID — UUID4 based, no collision risk"""
+    """Thread-safe unique ID â€” UUID4 based, no collision risk"""
     return f"{prefix}_{uuid.uuid4().hex[:12]}"
 
 
@@ -254,8 +254,8 @@ class AnomalyDetector:
 class ForecastEngine:
     """
     Tahmin motoru:
-      - EMA (Exponential Moving Average) — ana yontem
-      - Linear Regression — destek
+      - EMA (Exponential Moving Average) â€” ana yontem
+      - Linear Regression â€” destek
       - Basit mevsimsellik kontrolu (12+ ay varsa)
       - Confidence scoring
     """
@@ -711,7 +711,7 @@ class InsightBuilder:
 
     @staticmethod
     def _next_id(prefix):
-        """Thread-safe UUID-based ID — no collision in concurrent invocations"""
+        """Thread-safe UUID-based ID â€” no collision in concurrent invocations"""
         return _uid(prefix)
 
     @staticmethod
@@ -725,7 +725,7 @@ class InsightBuilder:
                 'id': InsightBuilder._next_id('anomaly'),
                 'type': 'anomaly_detection',
                 'priority': a.get('severity', 'MEDIUM'),
-                'title': f"Olagan disi harcama: {a['merchant']}",
+                'title': f"Olağan dışı harcama: {a['merchant']}",
                 'summary': f"{a['merchant']}'de {a['amount']:.0f} TL harcama. "
                            f"Z-skor: {a['z_score']:.1f} ({a['detection_method']})",
                 'confidence': _confidence(10, min(a['z_score'] / 4, 1.0)),
@@ -752,9 +752,9 @@ class InsightBuilder:
         if not forecast or forecast.get('next_month_estimate', 0) <= 0:
             return []
         trend_text = {
-            'up': 'Artis bekleniyor',
-            'down': 'Dusus bekleniyor',
-            'stable': 'Stabil gorunuyor'
+            'up': 'Artış bekleniyor',
+            'down': 'Düşüş bekleniyor',
+            'stable': 'Stabil görünüyor'
         }
         return [{
             'id': InsightBuilder._next_id('forecast'),
@@ -762,7 +762,7 @@ class InsightBuilder:
             'priority': 'HIGH' if forecast.get('trend') == 'up' else 'MEDIUM',
             'title': f"Gelecek ay tahmini: {forecast['next_month_estimate']:.0f} TL",
             'summary': f"{trend_text.get(forecast.get('trend'), 'Stabil')}. "
-                       f"Guven: %{forecast.get('confidence_score', 50)}.",
+                       f"Güven: %{forecast.get('confidence_score', 50)}.",
             'confidence': forecast.get('confidence_score', 50),
             'evidence': [
                 {'metric': 'tahmin', 'value': forecast['next_month_estimate'], 'unit': 'TL'},
@@ -784,9 +784,9 @@ class InsightBuilder:
                 'id': InsightBuilder._next_id('velocity'),
                 'type': 'spending_summary',
                 'priority': 'HIGH' if v.get('elapsed_pct', 0) < 50 and v.get('current_total', 0) > v.get('projected_month_end', 0) * 0.6 else 'MEDIUM',
-                'title': f"Harcama hizi: {v.get('days_elapsed', 0)} gunde {v.get('current_total', 0):.0f} TL",
-                'summary': f"Ayin %{v.get('elapsed_pct', 0):.0f}'i gecti. "
-                           f"Gunluk ortalama {v.get('daily_avg', 0):.0f} TL. "
+                'title': f"Harcama hızı: {v.get('days_elapsed', 0)} günde {v.get('current_total', 0):.0f} TL",
+                'summary': f"Ayın %{v.get('elapsed_pct', 0):.0f}'i geçti. "
+                           f"Günlük ortalama {v.get('daily_avg', 0):.0f} TL. "
                            f"Ay sonu tahmini: {v.get('projected_month_end', 0):.0f} TL.",
                 'confidence': _confidence(v.get('days_elapsed', 5), 0.5),
                 'evidence': [
@@ -805,8 +805,8 @@ class InsightBuilder:
                     'id': InsightBuilder._next_id('dow'),
                     'type': 'trend_analysis',
                     'priority': 'LOW',
-                    'title': f"En cok harcama gunu: {dow.get('peak_day', '')}",
-                    'summary': f"Hafta sonu harcamalariniz toplamin %{dow.get('weekend_pct', 0)}'i.",
+                    'title': f"En çok harcama günü: {dow.get('peak_day', '')}",
+                    'summary': f"Hafta sonu harcamalarınız toplamın %{dow.get('weekend_pct', 0)}'i.",
                     'confidence': _confidence(20, 0.3),
                     'evidence': [
                         {'metric': 'hafta_sonu_yuzde', 'value': dow.get('weekend_pct', 0), 'unit': '%'}
@@ -818,13 +818,13 @@ class InsightBuilder:
         shifts = patterns.get('category_shifts')
         if shifts and shifts.get('shifts'):
             for s in shifts['shifts'][:3]:
-                direction_label = 'artti' if s['direction'] == 'up' else 'azaldi'
+                direction_label = 'arttı' if s['direction'] == 'up' else 'azaldı'
                 cards.append({
                     'id': InsightBuilder._next_id('shift'),
                     'type': 'category_breakdown',
                     'priority': s.get('severity', 'MEDIUM'),
-                    'title': f"{s['category']} harcamasi %{abs(s['change_pct']):.0f} {direction_label}",
-                    'summary': f"Onceki aylarin ortalamasi {s['previous_avg']:.0f} TL, "
+                    'title': f"{s['category']} harcaması %{abs(s['change_pct']):.0f} {direction_label}",
+                    'summary': f"Önceki ayların ortalaması {s['previous_avg']:.0f} TL, "
                                f"bu ay {s['current']:.0f} TL.",
                     'confidence': _confidence(8, abs(s['change_pct']) / 100),
                     'evidence': [
@@ -841,9 +841,9 @@ class InsightBuilder:
                 'id': InsightBuilder._next_id('recur'),
                 'type': 'merchant_analysis',
                 'priority': 'MEDIUM' if recurring['total_monthly'] > 500 else 'LOW',
-                'title': f"Tespit edilen {len(recurring['items'])} tekrarlayan odeme",
-                'summary': f"Toplam aylik: {recurring['total_monthly']:.0f} TL, "
-                           f"yillik: {recurring['total_yearly']:.0f} TL.",
+                'title': f"Tespit edilen {len(recurring['items'])} tekrarlayan ödeme",
+                'summary': f"Toplam aylık: {recurring['total_monthly']:.0f} TL, "
+                           f"yıllık: {recurring['total_yearly']:.0f} TL.",
                 'confidence': _confidence(15, 0.6),
                 'evidence': [
                     {'metric': 'aylik_toplam', 'value': recurring['total_monthly'], 'unit': 'TL'},
@@ -863,12 +863,12 @@ class InsightBuilder:
         for b in budgets:
             pct = _sf(b.get('pct'))
             if pct >= 80:
-                status = 'asildi' if pct >= 100 else 'sinira yaklasti'
+                status = 'aşıldı' if pct >= 100 else 'sınıra yaklaştı'
                 cards.append({
                     'id': InsightBuilder._next_id('budget'),
                     'type': 'budget_forecast',
                     'priority': 'HIGH' if pct >= 100 else 'MEDIUM',
-                    'title': f"{b.get('category', '?')} butcesi {status}",
+                    'title': f"{b.get('category', '?')} bütçesi {status}",
                     'summary': f"{b.get('spent', 0):.0f} TL / {b.get('limit', 0):.0f} TL (%{pct:.0f}).",
                     'confidence': 95,
                     'evidence': [
@@ -877,6 +877,83 @@ class InsightBuilder:
                     ],
                     'actions': []
                 })
+        return cards
+
+    @staticmethod
+    def from_financial_health(financial_health, goals):
+        """Gelir-gider dengesi ve hedef ilerleme bilgilerini insight'a cevirir."""
+        cards = []
+        fh = financial_health or {}
+
+        period_income = _sf(fh.get('period_income'))
+        period_spent = _sf(fh.get('period_spent'))
+        period_net = _sf(fh.get('period_net'))
+        savings_rate = _sf(fh.get('savings_rate'))
+
+        if period_income > 0:
+            if savings_rate < 10:
+                cards.append({
+                    'id': InsightBuilder._next_id('health'),
+                    'type': 'financial_health',
+                    'priority': 'HIGH',
+                    'title': 'Tasarruf oranı kritik seviyede',
+                    'summary': f'Ay içinde {period_income:.0f} TL gelire karşı {period_spent:.0f} TL harcama var. Tasarruf oranı %{savings_rate:.1f}.',
+                    'confidence': 92,
+                    'evidence': [
+                        {'metric': 'gelir', 'value': period_income, 'unit': 'TL'},
+                        {'metric': 'gider', 'value': period_spent, 'unit': 'TL'},
+                        {'metric': 'tasarruf_oranı', 'value': savings_rate, 'unit': '%'},
+                    ],
+                    'actions': [
+                        'Bu ay en yüksek kategoriye %10 harcama limiti koy.',
+                        'Abonelikleri kontrol edip en az birini durdur.'
+                    ]
+                })
+            elif period_net > 0 and savings_rate >= 15:
+                cards.append({
+                    'id': InsightBuilder._next_id('health'),
+                    'type': 'financial_health',
+                    'priority': 'LOW',
+                    'title': 'Gelir-gider dengesi sağlıklı',
+                    'summary': f'Net bakiye {period_net:.0f} TL ve tasarruf oranı %{savings_rate:.1f}. Bu tempo hedef birikim için uygun.',
+                    'confidence': 85,
+                    'evidence': [
+                        {'metric': 'net', 'value': period_net, 'unit': 'TL'},
+                        {'metric': 'tasarruf_oranı', 'value': savings_rate, 'unit': '%'},
+                    ],
+                    'actions': [
+                        'Bu dengeyi korumak için sabit giderleri aylık bir kez gözden geçir.'
+                    ]
+                })
+
+        active_goals = [g for g in (goals or []) if str(g.get('status', 'active')).lower() == 'active']
+        if active_goals:
+            progress_values = []
+            for goal in active_goals:
+                target = _sf(goal.get('target_amount'))
+                current = _sf(goal.get('current_amount'))
+                if target > 0:
+                    progress_values.append((current / target) * 100)
+
+            if progress_values:
+                avg_progress = sum(progress_values) / len(progress_values)
+                cards.append({
+                    'id': InsightBuilder._next_id('goal'),
+                    'type': 'goal_progress',
+                    'priority': 'MEDIUM' if avg_progress < 70 else 'LOW',
+                    'title': f'Hedef ilerleme ortalaması %{avg_progress:.0f}',
+                    'summary': f'{len(active_goals)} aktif hedef var. Ortalama ilerleme %{avg_progress:.1f}.',
+                    'confidence': _confidence(len(active_goals), min(avg_progress / 100, 1)),
+                    'evidence': [
+                        {'metric': 'aktif_hedef', 'value': len(active_goals), 'unit': 'adet'},
+                        {'metric': 'ortalama_ilerleme', 'value': round(avg_progress, 1), 'unit': '%'},
+                    ],
+                    'actions': [
+                        'Her hedef için haftalık ara kilometre taşı belirle.',
+                        'Tamamlanan hedefleri kapatıp yenisini oluştur.'
+                    ]
+                })
+
         return cards
 
 
@@ -891,16 +968,16 @@ class LLMEnricher:
     """
 
     SYSTEM_PROMPT = (
-        "Rol: Turkce finans kocu (samimi, motive edici, analitik).\n"
-        "Gorev: Verilen JSON verilerini analiz et ve kullaniciya OZGUN, AKICI bir ozet sun.\n"
-        "Kurallar:\n"
-        "- 'Aylık Değerlendirme' gibi basliklar ATMA. Dogrudan konuya gir.\n"
-        "- Sablon cumleler kullanma. Veriye ozel konus.\n"
-        "- Eger harcama artmissa uyar, azalmissa tebrik et.\n"
-        "- Sadece JSON dondur.\n"
-        "- TDK uyumlu TURKCE (ş,ğ,ü,ö,ı,ç kullan).\n"
-        "JSON Format:\n"
-        '{"coach":{"headline":"Carpici baslik (max 60)","summary":"Akici paragraf (max 250)","focus_areas":["str","str"]},'
+        "Rol: T\u00fcrk\u00e7e finans ko\u00e7u (samimi, motive edici, analitik).\\n"
+        "G\u00f6rev: Verilen JSON verilerini analiz et ve kullan\u0131c\u0131ya \u00f6zg\u00fcn, ak\u0131c\u0131 bir \u00f6zet sun.\\n"
+        "Kurallar:\\n"
+        "- 'Ayl\u0131k De\u011ferlendirme' gibi ba\u015fl\u0131klar atma. Do\u011frudan konuya gir.\\n"
+        "- \u015eablon c\u00fcmleler kullanma. Veriye \u00f6zel konu\u015f.\\n"
+        "- E\u011fer harcama artm\u0131\u015fsa uyar, azalm\u0131\u015fsa tebrik et.\\n"
+        "- Sadece JSON d\u00f6nd\u00fcr.\\n"
+        "- T\u00fcrk\u00e7e karakterleri do\u011fru kullan: \u011f, \u00fc, \u015f, \u0131, \u00f6, \u00e7.\\n"
+        "JSON Format:\\n"
+        '{"coach":{"headline":"\u00c7arp\u0131c\u0131 ba\u015fl\u0131k (max 60)","summary":"Ak\u0131c\u0131 paragraf (max 250)","focus_areas":["str","str"]},'
         '"card_enrichments":[{"id":"card_id","title":"max 70char","summary":"max 160char","actions":["str","str"]}]}'
     )
 
@@ -960,11 +1037,11 @@ class LLMEnricher:
                 "messages": [{"role": "user", "content": prompt}]
             }
 
-            # ── Sanitized prompt logging (no PII) ──
+            # â”€â”€ Sanitized prompt logging (no PII) â”€â”€
             logger.info(f"LLM prompt size: {len(prompt)} chars, ~{len(prompt.split())} tokens")
             logger.info(f"LLM prompt preview: {_compact_text(prompt, 140)}...")
 
-            # ── Lazy Bedrock init ──
+            # â”€â”€ Lazy Bedrock init â”€â”€
             client = _get_bedrock()
             resp = client.invoke_model(
                 modelId=BEDROCK_MODEL_ID,
@@ -982,13 +1059,13 @@ class LLMEnricher:
 
             logger.info(f"LLM responded in {elapsed_ms}ms, tokens: in={input_tokens} out={output_tokens}, cost=${cost_usd}")
 
-            # ── Parse JSON ──
+            # â”€â”€ Parse JSON â”€â”€
             ai_data = LLMEnricher._parse_json(raw)
 
-            # ── Output Validation ──
+            # â”€â”€ Output Validation â”€â”€
             validation = LLMEnricher._validate_output(ai_data, insights)
 
-            # ── Hallucination Detection ──
+            # â”€â”€ Hallucination Detection â”€â”€
             hallucination_flags = LLMEnricher._detect_hallucination(ai_data, prompt, insights)
 
             # Build observability record
@@ -1123,16 +1200,16 @@ class LLMEnricher:
     @staticmethod
     def _fallback_coach(period, forecast):
         """LLM basarisiz olursa basit fallback"""
-        headline = f"{period} analizi tamamlandi."
+        headline = f"{period} analizi tamamlandı."
         if forecast and forecast.get('trend') == 'up':
-            headline = f"Dikkat: harcamalar artis egiliminde!"
+            headline = "Dikkat: harcamalar artış eğiliminde!"
         elif forecast and forecast.get('trend') == 'down':
-            headline = f"Harcamalariniz dusus egiliminde."
+            headline = "Harcamalarınız düşüş eğiliminde."
 
         return {
             'headline': headline,
-            'summary': f"{period} donemine ait finansal analiz sonuclari hazir.",
-            'focus_areas': ['Butce takibi', 'Harcama trendi', 'Tasarruf firsatlari']
+            'summary': f"{period} dönemine ait finansal analiz sonuçları hazır.",
+            'focus_areas': ['Bütçe takibi', 'Harcama trendi', 'Tasarruf fırsatları']
         }
 
 
@@ -1159,6 +1236,8 @@ def run_analysis(payload):
     transactions = payload.get('transactions', [])
     budgets = payload.get('budgets', [])
     subscriptions = payload.get('subscriptions', [])
+    goals = payload.get('goals', [])
+    financial_health = payload.get('financialHealth', {})
     merchant_stats = payload.get('merchantStats', [])
 
     all_insights = []
@@ -1172,7 +1251,7 @@ def run_analysis(payload):
         f"skipLLM={skip_llm} (input_skip={input_skip_llm}, auto_skip={auto_skip_llm})"
     )
 
-    # ── STEP 1: Complex Anomaly Detection ──
+    # â”€â”€ STEP 1: Complex Anomaly Detection â”€â”€
     step_start = time.time()
     try:
         anomalies = AnomalyDetector.detect(transactions)
@@ -1182,7 +1261,7 @@ def run_analysis(payload):
         logger.error(f"[{request_id}] Anomaly detection error: {e}", exc_info=True)
         anomalies = []
 
-    # ── STEP 2: Forecasting ──
+    # â”€â”€ STEP 2: Forecasting â”€â”€
     step_start = time.time()
     try:
         forecast = ForecastEngine.forecast(monthly_totals)
@@ -1193,7 +1272,7 @@ def run_analysis(payload):
         logger.error(f"[{request_id}] Forecast error: {e}", exc_info=True)
         forecast = {'next_month_estimate': 0, 'trend': 'stable', 'confidence_score': 10}
 
-    # ── STEP 3: Pattern Mining ──
+    # â”€â”€ STEP 3: Pattern Mining â”€â”€
     step_start = time.time()
     try:
         velocity = PatternMiner.spending_velocity(transactions, period)
@@ -1221,17 +1300,23 @@ def run_analysis(payload):
     except Exception as e:
         logger.error(f"[{request_id}] Pattern mining error: {e}", exc_info=True)
 
-    # ── STEP 4: Budget Alert Insights ──
+    # â”€â”€ STEP 4: Budget Alert Insights â”€â”€
     try:
         all_insights.extend(InsightBuilder.from_budget_alerts(budgets))
     except Exception as e:
         logger.error(f"[{request_id}] Budget insight error: {e}", exc_info=True)
 
+    # Step 4b: Financial health + goal progress insights
+    try:
+        all_insights.extend(InsightBuilder.from_financial_health(financial_health, goals))
+    except Exception as e:
+        logger.error(f"[{request_id}] Financial health insight error: {e}", exc_info=True)
+
     # Sort insights by priority (HIGH first)
     priority_order = {'HIGH': 0, 'MEDIUM': 1, 'LOW': 2}
     all_insights.sort(key=lambda c: priority_order.get(c.get('priority', 'LOW'), 2))
 
-    # ── STEP 5: LLM Enrichment (Katman 3) ──
+    # â”€â”€ STEP 5: LLM Enrichment (Katman 3) â”€â”€
     llm_obs = {}
     if not skip_llm:
         step_start = time.time()
@@ -1245,7 +1330,7 @@ def run_analysis(payload):
         logger.info(f"[{request_id}] LLM skipped (cache/flag)")
         coach = LLMEnricher._fallback_coach(period, forecast)
 
-    # ── BUILD RESPONSE ──
+    # â”€â”€ BUILD RESPONSE â”€â”€
     next_actions = _build_next_actions(all_insights)
 
     # Cache key for backend to check staleness
@@ -1264,17 +1349,23 @@ def run_analysis(payload):
         'anomalies': anomalies[:10],
         'patterns': all_patterns,
         'next_actions': next_actions,
+        'financial_health': financial_health,
+        'goals_summary': {
+            'active_count': len([g for g in goals if str(g.get('status', 'active')).lower() == 'active']),
+            'total_count': len(goals),
+        },
         'meta': {
             'model_version': BEDROCK_MODEL_ID,
             'generated_at': datetime.utcnow().isoformat() + 'Z',
-            'analysis_version': 'v5',
+            'analysis_version': 'v6',
             'period': period,
             'cache_key': cache_key,
             'llm_observability': llm_obs,
             'input_stats': {
                 'monthly_count': len(monthly_totals),
                 'transaction_count': len(transactions),
-                'budget_count': len(budgets)
+                'budget_count': len(budgets),
+                'goal_count': len(goals)
             }
         }
     }
@@ -1348,7 +1439,7 @@ def lambda_handler(event, context):
             return {
                 'statusCode': 200,
                 'body': {
-                    'coach': {'headline': 'Analiz icin yeterli veri yok.', 'summary': '', 'focus_areas': []},
+                    'coach': {'headline': 'Analiz için yeterli veri yok.', 'summary': '', 'focus_areas': []},
                     'insights': [],
                     'forecast': None,
                     'anomalies': [],

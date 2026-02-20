@@ -18,9 +18,10 @@ const Incomes = () => {
         description: ''
     });
 
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     useEffect(() => {
         fetchIncomes();
-    }, []);
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
     const fetchIncomes = async () => {
         try {
@@ -228,3 +229,6 @@ const Incomes = () => {
 };
 
 export default Incomes;
+
+
+

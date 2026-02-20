@@ -1,0 +1,56 @@
+name: Deploy Backend Lambda
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'backend_lambda/**'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Dependencies
+        working-directory: ./backend_lambda
+        run: |
+          # Temiz bir yükleme yaparak Linux uyumlu bağımlılıkları hazırlar
+          # psycopg2-binary gibi paketlerin Lambda (Linux) üzerinde çalışması için bu adım kritik
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -t .
+
+      - name: Create Deployment Package
+        working-directory: ./backend_lambda
+        run: |
+          # Gereksiz dosyaları (testler, github workflows, pycache) dışlayarak zip oluşturur
+          zip -r ../deployment_package.zip . -x "*.git*" "*.github*" "__pycache__*" "tests/*" "*.zip"
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEYID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Deploy to AWS Lambda
+        run: |
+          aws lambda update-function-code \
+            --function-name ${{ secrets.LAMBDA_FUNCTION_NAME }} \
+            --zip-file fileb://deployment_package.zip
+
+      - name: Wait for Lambda Update
+        run: |
+          aws lambda wait function-updated --function-name ${{ secrets.LAMBDA_FUNCTION_NAME }}
+
+      # Opsiyonel: Migration tetikleme (Raporunuzda bahsettiğiniz adım için)
+      #- name: Run Migrations
+      #  run: |
+      #    aws lambda invoke --function-name ${{ secrets.LAMBDA_FUNCTION_NAME }} --payload '{"action": "migrate"}' out.json

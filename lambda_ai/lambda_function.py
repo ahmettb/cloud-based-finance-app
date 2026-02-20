@@ -1450,7 +1450,9 @@ def lambda_handler(event, context):
             }
 
 
-            
+
+
+
 
         # Run analysis
         result = run_analysis(payload)

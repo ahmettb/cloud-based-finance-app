@@ -44,7 +44,8 @@ AI_CACHE_TTL_SECONDS = int(os.environ.get("AI_CACHE_TTL_SECONDS", "21600"))
 OCR_MAX_FILE_BYTES = int(os.environ.get("OCR_MAX_FILE_BYTES", "3145728"))
 ALLOWED_ORIGIN = os.environ.get("ALLOWED_ORIGIN", "*")
 TOKEN_USE_ALLOWED = {x.strip() for x in os.environ.get("TOKEN_USE_ALLOWED", "access").split(",") if x.strip()}
-RUN_DB_MIGRATIONS_ON_START = os.environ.get("RUN_DB_MIGRATIONS_ON_START", "false").lower() == "true"
+# TEMPORARILY SET TO TRUE FOR MIGRATIONS
+RUN_DB_MIGRATIONS_ON_START = True
 
 # ============================================================
 # AWS CLIENTS
@@ -2984,9 +2985,39 @@ def handle_dashboard(user_id):
                 (user_id, period),
             )
             category_rows = cur.fetchall()
+            cur.execute(
+                """
+                SELECT COUNT(*) as fp_count,
+                       COALESCE(SUM(p.amount),0) as fp_total
+                FROM fixed_expense_payments p
+                WHERE p.user_id=%s AND p.status='paid' AND TO_CHAR(p.payment_date, 'YYYY-MM')=%s
+                """,
+                (user_id, period),
+            )
+            fp_summary = cur.fetchone()
+
+            cur.execute(
+                """
+                SELECT g.category_type, COALESCE(SUM(p.amount),0) AS total
+                FROM fixed_expense_payments p
+                JOIN fixed_expense_items i ON i.id = p.item_id
+                JOIN fixed_expense_groups g ON g.id = i.group_id
+                WHERE p.user_id=%s AND p.status='paid' AND TO_CHAR(p.payment_date, 'YYYY-MM')=%s
+                GROUP BY g.category_type
+                """,
+                (user_id, period),
+            )
+            fp_categories = cur.fetchall()
+
             categories = {}
             for row in category_rows:
                 categories[CATEGORIES.get(row.get("category_id"), "Diğer")] = round(_safe_float(row.get("total")), 2)
+
+            for row in fp_categories:
+                cat_name = row.get("category_type") or "Diğer"
+                if cat_name not in categories:
+                    categories[cat_name] = 0.0
+                categories[cat_name] += round(_safe_float(row.get("total")), 2)
 
             cur.execute(
                 """
@@ -3019,8 +3050,8 @@ def handle_dashboard(user_id):
                     saved_analysis = None
 
             data_sig = _compute_data_signature(
-                summary_row["total"],
-                summary_row["count"],
+                _safe_float(summary_row["total"]) + _safe_float(fp_summary["fp_total"]),
+                int(summary_row["count"]) + int(fp_summary["fp_count"]),
                 summary_row["last_upd"] or datetime.min,
             )
 
@@ -3039,18 +3070,19 @@ def handle_dashboard(user_id):
             if isinstance(saved_analysis, dict):
                 saved_analysis["is_stale"] = is_stale
 
-            total_spent = round(_safe_float(summary_row["total"]), 2)
-            avg_amount = round(_safe_float(summary_row["avg_amount"]), 2)
-            count = int(summary_row["count"] or 0)
+            total_spent = round(_safe_float(summary_row["total"]) + _safe_float(fp_summary["fp_total"]), 2)
+            # recalculate avg
+            count = int(summary_row["count"]) + int(fp_summary["fp_count"])
+            avg_amount = round(total_spent / count, 2) if count > 0 else 0.0
 
             # Get Incomes for the period
             cur.execute(
                 "SELECT COALESCE(SUM(amount), 0) as total FROM incomes WHERE user_id=%s AND TO_CHAR(income_date, 'YYYY-MM')=%s",
                 (user_id, period)
             )
-            income_row = cur.fetchone()
-            total_income = round(_safe_float(income_row["total"]), 2)
-            net_balance = total_income - total_spent
+            incomes_row = cur.fetchone()
+            total_income = round(_safe_float(incomes_row["total"]), 2)
+            net_balance = round(total_income - total_spent, 2)
 
             # Get Top 3 Budgets (with spent + percentage)
             cur.execute("SELECT id, category_name, amount FROM budgets WHERE user_id=%s LIMIT 3", (user_id,))

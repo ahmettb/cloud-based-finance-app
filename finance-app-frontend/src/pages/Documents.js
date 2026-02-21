@@ -209,9 +209,9 @@ const Documents = () => {
 
                 {/* Date Filter */}
                 <div className="flex items-center bg-slate-50 dark:bg-slate-800 rounded-xl p-1 md:col-span-1 border border-slate-200 dark:border-slate-700">
-                    <button onClick={handleFilterChange(setDateFilter)('all')} className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-colors ${dateFilter === 'all' ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Tümü</button>
-                    <button onClick={handleFilterChange(setDateFilter)('this_month')} className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-colors ${dateFilter === 'this_month' ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Bu Ay</button>
-                    <button onClick={handleFilterChange(setDateFilter)('last_month')} className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-colors ${dateFilter === 'last_month' ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Geçen Ay</button>
+                    <button onClick={() => handleFilterChange(setDateFilter)('all')} className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-colors ${dateFilter === 'all' ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Tümü</button>
+                    <button onClick={() => handleFilterChange(setDateFilter)('this_month')} className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-colors ${dateFilter === 'this_month' ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Bu Ay</button>
+                    <button onClick={() => handleFilterChange(setDateFilter)('last_month')} className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-colors ${dateFilter === 'last_month' ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Geçen Ay</button>
                 </div>
 
                 {/* Category Filter */}

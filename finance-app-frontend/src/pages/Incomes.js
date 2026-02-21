@@ -219,53 +219,70 @@ const Incomes = () => {
                             <p className="text-sm">Henüz gelir kaydı yok.</p>
                         </div>
                     ) : (
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-left border-collapse">
-                                <thead className="bg-slate-50 dark:bg-slate-800/50 text-xs text-slate-500 uppercase border-b border-slate-100 dark:border-slate-800">
-                                    <tr>
-                                        <th className="p-4 font-bold">Kaynak</th>
-                                        <th className="p-4 font-bold">Tarih</th>
-                                        <th className="p-4 font-bold text-right">Tutar</th>
-                                        <th className="p-4"></th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                                    {incomes.map(inc => (
-                                        <tr key={inc.id} className={`group hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors ${editingIncome?.id === inc.id ? 'bg-emerald-50/50 dark:bg-emerald-900/10' : ''}`}>
-                                            <td className="p-4">
-                                                <div className="font-bold text-slate-900 dark:text-white text-sm">{inc.source}</div>
-                                                <div className="text-xs text-slate-400">{inc.description || '-'}</div>
-                                            </td>
-                                            <td className="p-4 text-sm font-medium text-slate-600 dark:text-slate-300">
-                                                {formatDate(inc.income_date)}
-                                            </td>
-                                            <td className="p-4 text-right">
-                                                <span className="font-bold text-emerald-600 dark:text-emerald-400 text-sm">
-                                                    +{formatCurrency(inc.amount)}
-                                                </span>
-                                            </td>
-                                            <td className="p-4 text-right">
-                                                <div className="flex items-center gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
-                                                    <button
-                                                        onClick={() => openEditForm(inc)}
-                                                        className="p-2 text-slate-300 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-all"
-                                                        title="Düzenle"
-                                                    >
-                                                        <span className="material-icons-round text-lg">edit</span>
-                                                    </button>
-                                                    <button
-                                                        onClick={() => setDeleteId(inc.id)}
-                                                        className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-all"
-                                                        title="Sil"
-                                                    >
-                                                        <span className="material-icons-round text-lg">delete</span>
-                                                    </button>
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
+                        <div className="overflow-x-auto p-4 space-y-6">
+                            {Object.entries(incomes.reduce((acc, current) => {
+                                if (!acc[current.source]) acc[current.source] = { entries: [], total: 0 };
+                                acc[current.source].entries.push(current);
+                                acc[current.source].total += Number(current.amount);
+                                return acc;
+                            }, {})).map(([source, group]) => (
+                                <div key={source} className="bg-slate-50 dark:bg-slate-800/50 rounded-xl overflow-hidden border border-slate-100 dark:border-slate-800">
+                                    <div className="px-4 py-3 bg-white dark:bg-slate-800 border-b border-slate-100 dark:border-slate-700 flex justify-between items-center">
+                                        <h4 className="font-bold text-slate-800 dark:text-slate-200 text-sm flex items-center gap-2">
+                                            <span className="material-icons-round text-emerald-500 text-[18px]">account_balance_wallet</span>
+                                            {source}
+                                        </h4>
+                                        <span className="font-extrabold text-emerald-600 dark:text-emerald-400 text-sm">
+                                            Toplam: {formatCurrency(group.total)}
+                                        </span>
+                                    </div>
+                                    <table className="w-full text-left border-collapse">
+                                        <thead className="text-xs text-slate-500 uppercase border-b border-slate-100 dark:border-slate-700/50 hidden md:table-header-group">
+                                            <tr>
+                                                <th className="p-3 font-bold pl-4">Açıklama</th>
+                                                <th className="p-3 font-bold">Tarih</th>
+                                                <th className="p-3 font-bold text-right">Tutar</th>
+                                                <th className="p-3 w-20"></th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50">
+                                            {group.entries.map(inc => (
+                                                <tr key={inc.id} className={`group hover:bg-slate-100 dark:hover:bg-slate-700/50 transition-colors ${editingIncome?.id === inc.id ? 'bg-emerald-50/50 dark:bg-emerald-900/10' : ''}`}>
+                                                    <td className="p-3 pl-4">
+                                                        <div className="text-sm font-medium text-slate-700 dark:text-slate-300">{inc.description || '-'}</div>
+                                                    </td>
+                                                    <td className="p-3 text-sm font-medium text-slate-500 dark:text-slate-400">
+                                                        {formatDate(inc.income_date)}
+                                                    </td>
+                                                    <td className="p-3 text-right">
+                                                        <span className="font-bold text-emerald-600 dark:text-emerald-400 text-sm">
+                                                            {formatCurrency(inc.amount)}
+                                                        </span>
+                                                    </td>
+                                                    <td className="p-3 pr-4 text-right">
+                                                        <div className="flex items-center gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+                                                            <button
+                                                                onClick={() => openEditForm(inc)}
+                                                                className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-all"
+                                                                title="Düzenle"
+                                                            >
+                                                                <span className="material-icons-round text-[18px]">edit</span>
+                                                            </button>
+                                                            <button
+                                                                onClick={() => setDeleteId(inc.id)}
+                                                                className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-all"
+                                                                title="Sil"
+                                                            >
+                                                                <span className="material-icons-round text-[18px]">delete</span>
+                                                            </button>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            ))}
                         </div>
                     )}
                 </div>

@@ -83,6 +83,8 @@ CATEGORIES = {
     6: 'Konaklama',
     7: 'Ulaşım',
     8: 'Diğer',
+    9: 'Abonelik',
+    10: 'Eğitim',
 }
 
 CATEGORY_NAME_TO_ID = {_normalize_text(name): cid for cid, name in CATEGORIES.items()}
@@ -96,6 +98,8 @@ CATEGORY_KEYWORDS = {
     6: ['otel', 'hotel', 'pansiyon', 'konaklama', 'airbnb', 'tatil', 'resort', 'hostel'],
     7: ['taksi', 'uber', 'petrol', 'shell', 'opet', 'bilet', 'thy', 'pegasus', 'metro', 'iett', 'benzin', 'motorin', 'lpg'],
     8: ['eczane', 'hastane', 'saglik', 'doktor', 'klinik', 'kuafor', 'berber', 'kirtasiye', 'noter', 'vergi', 'diger'],
+    9: ['spotify', 'netflix', 'youtube', 'disney', 'abonelik', 'subscription', 'premium'],
+    10: ['okul', 'egitim', 'kurs', 'kitap', 'udemy', 'kirtasiye', 'college', 'school'],
 }
 
 SUPPORTED_UPLOAD_TYPES = {
@@ -3097,7 +3101,20 @@ def handle_dashboard(user_id):
                 (user_id, period),
             )
             spent_dash = cur.fetchall()
-            spent_dash_map = {CATEGORIES.get(r["category_id"], "Diğer"): _safe_float(r["spent"]) for r in spent_dash}
+            
+            # Combine receipts and fixed expenses for budgets
+            spent_dash_map = {}
+            for r in spent_dash:
+                cat_name = CATEGORIES.get(r["category_id"], "Diğer")
+                spent_dash_map[cat_name] = _safe_float(r["spent"])
+            
+            # Add fixed expense payments to the same map for budget tracking
+            for row in fp_categories: # fp_categories was fetched earlier in handle_dashboard
+                cat_name = row.get("category_type") or "Diğer"
+                if cat_name not in spent_dash_map:
+                    spent_dash_map[cat_name] = 0.0
+                spent_dash_map[cat_name] += _safe_float(row.get("total"))
+
             budgets = []
             for b in budget_rows_dash:
                 cat = b.get("category_name")

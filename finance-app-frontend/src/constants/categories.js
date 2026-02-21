@@ -6,6 +6,8 @@ export const CATEGORY_OPTIONS = [
     { id: 5, name: 'Fatura', icon: 'receipt_long' },
     { id: 6, name: 'Konaklama', icon: 'hotel' },
     { id: 7, name: 'Ulaşım', icon: 'commute' },
+    { id: 9, name: 'Abonelik', icon: 'subscriptions' },
+    { id: 10, name: 'Eğitim', icon: 'school' },
     { id: 8, name: 'Diğer', icon: 'category' }
 ];
 
@@ -56,6 +58,8 @@ export const resolveCategoryId = (value) => {
         barinma: 6,
         konaklama: 6,
         ulasim: 7,
+        abonelik: 9,
+        egitim: 10,
         saglik: 8,
         giyim: 8,
         teknoloji: 4,

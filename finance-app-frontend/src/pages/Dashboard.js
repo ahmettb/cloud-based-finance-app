@@ -364,8 +364,8 @@ const Dashboard = () => {
                                 )) : <p className="text-xs text-slate-400">Abonelik bulunamadı.</p>}
                             </div>
                             <div className="mt-4 pt-3 border-t border-slate-50 dark:border-slate-800">
-                                <button onClick={() => navigate('/budget')} className="text-xs font-bold text-indigo-600 hover:text-indigo-700 flex items-center gap-1">
-                                    Tümünü Gör <span className="material-icons-round text-xs">arrow_forward</span>
+                                <button onClick={() => navigate('/budget')} className="text-xs font-bold text-indigo-600 hover:text-indigo-700 flex items-center justify-center w-full py-2 bg-slate-50 dark:bg-slate-800/50 rounded-lg group transition-all">
+                                    Daha fazlası için tıklayın <span className="material-icons-round text-xs group-hover:translate-x-1 transition-transform ml-1">arrow_forward</span>
                                 </button>
                             </div>
                         </div>
@@ -389,8 +389,8 @@ const Dashboard = () => {
                                 )) : <p className="text-xs text-slate-400">Bütçe hedefi bulunamadı.</p>}
                             </div>
                             <div className="mt-4 pt-3 border-t border-slate-50 dark:border-slate-800">
-                                <button onClick={() => navigate('/budget')} className="text-xs font-bold text-indigo-600 hover:text-indigo-700 flex items-center gap-1">
-                                    Detaylı Planlama <span className="material-icons-round text-xs">arrow_forward</span>
+                                <button onClick={() => navigate('/budget')} className="text-xs font-bold text-indigo-600 hover:text-indigo-700 flex items-center justify-center w-full py-2 bg-slate-50 dark:bg-slate-800/50 rounded-lg group transition-all">
+                                    Daha fazlası için tıklayın <span className="material-icons-round text-xs group-hover:translate-x-1 transition-transform ml-1">arrow_forward</span>
                                 </button>
                             </div>
                         </div>

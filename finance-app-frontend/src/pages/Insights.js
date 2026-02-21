@@ -28,6 +28,10 @@ const Insights = () => {
     const [whatIfCategory, setWhatIfCategory] = useState('');
     const [whatIfCutPercent, setWhatIfCutPercent] = useState(10);
 
+    // Goal inline edit state (replaces window.prompt)
+    const [editingGoalId, setEditingGoalId] = useState(null);
+    const [editingGoalValue, setEditingGoalValue] = useState('');
+
     const [goalForm, setGoalForm] = useState({
         title: '',
         target_amount: '',
@@ -132,22 +136,27 @@ const Insights = () => {
     };
 
     const handleGoalProgress = async (goal) => {
-        const nextValue = window.prompt('Güncel tutar', String(goal.current_amount || 0));
-        if (nextValue === null) return;
-        const parsed = Number(nextValue);
-        if (Number.isNaN(parsed) || parsed < 0) {
-            toast.show.warning('Geçerli bir tutar girin');
-            return;
-        }
-        try {
-            await api.updateGoal(goal.id, {
-                current_amount: parsed,
-                status: parsed >= Number(goal.target_amount || 0) ? 'completed' : 'active'
-            });
-            toast.show.success('Hedef güncellendi');
-            await loadAll();
-        } catch (error) {
-            toast.show.error(error.message || 'Hedef güncellenemedi');
+        if (editingGoalId === goal.id) {
+            const parsed = Number(editingGoalValue);
+            if (Number.isNaN(parsed) || parsed < 0) {
+                toast.show.warning('Geçerli bir tutar girin');
+                return;
+            }
+            try {
+                await api.updateGoal(goal.id, {
+                    current_amount: parsed,
+                    status: parsed >= Number(goal.target_amount || 0) ? 'completed' : 'active'
+                });
+                toast.show.success('Hedef güncellendi');
+                setEditingGoalId(null);
+                setEditingGoalValue('');
+                await loadAll();
+            } catch (error) {
+                toast.show.error(error.message || 'Hedef güncellenemedi');
+            }
+        } else {
+            setEditingGoalId(goal.id);
+            setEditingGoalValue(String(goal.current_amount || 0));
         }
     };
 
@@ -235,6 +244,43 @@ const Insights = () => {
                 </div>
             </div>
 
+            {/* Financial Health Score */}
+            {analysis?.health_score && (
+                <div className="mb-8 bg-gradient-to-r from-slate-900 to-slate-800 rounded-2xl p-6 shadow-lg text-white flex flex-col sm:flex-row items-center gap-6">
+                    <div className="relative w-24 h-24 shrink-0">
+                        <svg className="w-24 h-24 transform -rotate-90" viewBox="0 0 100 100">
+                            <circle cx="50" cy="50" r="42" fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth="8" />
+                            <circle
+                                cx="50" cy="50" r="42" fill="none"
+                                stroke={analysis.health_score.score >= 80 ? '#10b981' : analysis.health_score.score >= 60 ? '#6366f1' : analysis.health_score.score >= 40 ? '#f59e0b' : '#ef4444'}
+                                strokeWidth="8" strokeLinecap="round"
+                                strokeDasharray={`${(analysis.health_score.score / 100) * 264} 264`}
+                            />
+                        </svg>
+                        <div className="absolute inset-0 flex flex-col items-center justify-center">
+                            <span className="text-2xl font-bold">{analysis.health_score.score}</span>
+                            <span className="text-[9px] text-slate-400 uppercase tracking-wider">puan</span>
+                        </div>
+                    </div>
+                    <div className="flex-1 text-center sm:text-left">
+                        <h3 className="text-lg font-bold mb-1">Finansal Sağlık: {analysis.health_score.label}</h3>
+                        <p className="text-sm text-slate-400 mb-3">Tasarruf, bütçe uyumu, trend, hedef ilerleme ve anomali durumuna göre hesaplanır.</p>
+                        {analysis.health_score.breakdown && (
+                            <div className="flex flex-wrap gap-2">
+                                {Object.entries(analysis.health_score.breakdown).map(([key, val]) => {
+                                    const labels = { savings: 'Tasarruf', budget: 'Bütçe', trend: 'Trend', goals: 'Hedefler', anomalies: 'Anomali' };
+                                    return (
+                                        <span key={key} className="text-[10px] px-2 py-1 rounded-full bg-white/10 font-medium">
+                                            {labels[key] || key}: {val}
+                                        </span>
+                                    );
+                                })}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
+
             {/* Key Metrics */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
                 {keyMetrics.map((metric) => (
@@ -264,7 +310,7 @@ const Insights = () => {
                         </h3>
                         <div className="relative z-10 bg-white/10 backdrop-blur-sm rounded-xl p-5 border border-white/20">
                             <p className="text-sm leading-relaxed font-medium">
-                                "{analysis?.coach?.summary || 'Bu dönem için koç özeti bulunamadı.'}"
+                                {analysis?.coach?.summary || 'Bu dönem için koç özeti bulunamadı.'}
                             </p>
                         </div>
                         <div className="mt-4 flex flex-wrap gap-2 relative z-10">
@@ -381,12 +427,33 @@ const Insights = () => {
                                             ></div>
                                         </div>
                                         <div className="mt-3 flex justify-end gap-2 opacity-80 hover:opacity-100 transition-opacity">
-                                            <button onClick={() => handleGoalProgress(goal)} className="text-[10px] font-bold px-2 py-1 rounded bg-white border border-slate-200 hover:bg-slate-50 text-slate-600">
-                                                Güncelle
-                                            </button>
-                                            <button onClick={() => handleArchiveGoal(goal.id)} className="text-[10px] font-bold px-2 py-1 rounded bg-white border border-slate-200 hover:bg-red-50 hover:text-red-600 hover:border-red-100 text-slate-400">
-                                                Arşivle
-                                            </button>
+                                            {editingGoalId === goal.id ? (
+                                                <>
+                                                    <input
+                                                        type="number"
+                                                        value={editingGoalValue}
+                                                        onChange={(e) => setEditingGoalValue(e.target.value)}
+                                                        className="w-24 text-[10px] px-2 py-1 rounded border border-indigo-300 bg-white focus:ring-2 focus:ring-indigo-200 outline-none font-bold"
+                                                        autoFocus
+                                                        onKeyDown={(e) => e.key === 'Enter' && handleGoalProgress(goal)}
+                                                    />
+                                                    <button onClick={() => handleGoalProgress(goal)} className="text-[10px] font-bold px-2 py-1 rounded bg-indigo-500 text-white hover:bg-indigo-600">
+                                                        Kaydet
+                                                    </button>
+                                                    <button onClick={() => { setEditingGoalId(null); setEditingGoalValue(''); }} className="text-[10px] font-bold px-2 py-1 rounded bg-white border border-slate-200 hover:bg-slate-50 text-slate-500">
+                                                        İptal
+                                                    </button>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <button onClick={() => handleGoalProgress(goal)} className="text-[10px] font-bold px-2 py-1 rounded bg-white border border-slate-200 hover:bg-slate-50 text-slate-600">
+                                                        Güncelle
+                                                    </button>
+                                                    <button onClick={() => handleArchiveGoal(goal.id)} className="text-[10px] font-bold px-2 py-1 rounded bg-white border border-slate-200 hover:bg-red-50 hover:text-red-600 hover:border-red-100 text-slate-400">
+                                                        Arşivle
+                                                    </button>
+                                                </>
+                                            )}
                                         </div>
                                     </div>
                                 );

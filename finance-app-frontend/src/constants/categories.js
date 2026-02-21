@@ -2,11 +2,11 @@ export const CATEGORY_OPTIONS = [
     { id: 1, name: 'Market', icon: 'shopping_cart' },
     { id: 2, name: 'Restoran', icon: 'restaurant' },
     { id: 3, name: 'Kafe', icon: 'coffee' },
-    { id: 4, name: 'Online Alisveris', icon: 'shopping_bag' },
+    { id: 4, name: 'Online Alışveriş', icon: 'shopping_bag' },
     { id: 5, name: 'Fatura', icon: 'receipt_long' },
     { id: 6, name: 'Konaklama', icon: 'hotel' },
-    { id: 7, name: 'Ulasim', icon: 'commute' },
-    { id: 8, name: 'Diger', icon: 'category' }
+    { id: 7, name: 'Ulaşım', icon: 'commute' },
+    { id: 8, name: 'Diğer', icon: 'category' }
 ];
 
 export const CATEGORY_NAME_TO_ID = CATEGORY_OPTIONS.reduce((acc, item) => {
@@ -21,7 +21,7 @@ export const CATEGORY_ID_TO_NAME = CATEGORY_OPTIONS.reduce((acc, item) => {
 
 export const VARIABLE_CATEGORIES = CATEGORY_OPTIONS.map((c) => c.name);
 
-export const FIXED_GROUP_CATEGORIES = ['Kira', 'Fatura', 'Abonelik', 'Kredi', 'Egitim', 'Diger'];
+export const FIXED_GROUP_CATEGORIES = ['Kira', 'Fatura', 'Abonelik', 'Kredi', 'Eğitim', 'Diğer'];
 
 export const normalizeCategoryName = (value) => {
     if (!value) return '';

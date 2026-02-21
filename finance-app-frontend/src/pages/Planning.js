@@ -25,7 +25,7 @@ const Planning = () => {
             setSubscriptions(sRes.data || []);
         } catch (error) {
             console.error(error);
-            setMessage({ type: 'error', text: 'Veriler yuklenemedi.' });
+            setMessage({ type: 'error', text: 'Veriler yüklenemedi.' });
         } finally {
             setLoading(false);
         }
@@ -38,11 +38,11 @@ const Planning = () => {
                 category_name: budgetForm.category_name,
                 amount: parseFloat(budgetForm.amount)
             });
-            setMessage({ type: 'success', text: 'Butce hedefi guncellendi.' });
+            setMessage({ type: 'success', text: 'Bütçe hedefi güncellendi.' });
             setBudgetForm((prev) => ({ ...prev, amount: '' }));
             fetchData();
         } catch (error) {
-            setMessage({ type: 'error', text: 'Butce guncellenemedi.' });
+            setMessage({ type: 'error', text: 'Bütçe güncellenemedi.' });
         }
     };
 
@@ -72,6 +72,16 @@ const Planning = () => {
         }
     };
 
+    const handleDeleteBudget = async (id) => {
+        try {
+            await api.deleteBudget(id);
+            setBudgets((prev) => prev.filter((b) => String(b.id) !== String(id)));
+            setMessage({ type: 'success', text: 'Bütçe hedefi silindi.' });
+        } catch (error) {
+            setMessage({ type: 'error', text: 'Bütçe silinemedi.' });
+        }
+    };
+
     if (loading) {
         return (
             <DashboardLayout>
@@ -85,12 +95,12 @@ const Planning = () => {
     return (
         <DashboardLayout>
             <div className="mb-8">
-                <h1 className="text-2xl font-bold text-[#111318] dark:text-white">Planlama ve Yonetim</h1>
-                <p className="text-slate-500 text-sm">Butce hedeflerini ve duzenli odemeleri yonetin.</p>
+                <h1 className="text-2xl font-bold text-[#111318] dark:text-white">Planlama ve Yönetim</h1>
+                <p className="text-slate-500 text-sm">Bütçe hedeflerini ve düzenli ödemeleri yönetin.</p>
             </div>
 
             <div className="flex gap-4 border-b border-slate-200 dark:border-slate-800 mb-8">
-                <button onClick={() => setActiveTab('budget')} className={`pb-3 px-4 text-sm font-bold ${activeTab === 'budget' ? 'text-[#135bec] border-b-2 border-[#135bec]' : 'text-slate-500'}`}>Butce Hedefleri</button>
+                <button onClick={() => setActiveTab('budget')} className={`pb-3 px-4 text-sm font-bold ${activeTab === 'budget' ? 'text-[#135bec] border-b-2 border-[#135bec]' : 'text-slate-500'}`}>Bütçe Hedefleri</button>
                 <button onClick={() => setActiveTab('subscription')} className={`pb-3 px-4 text-sm font-bold ${activeTab === 'subscription' ? 'text-[#135bec] border-b-2 border-[#135bec]' : 'text-slate-500'}`}>Abonelik Takibi</button>
             </div>
 
@@ -104,19 +114,19 @@ const Planning = () => {
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                 <div className="bg-white dark:bg-[#101622] p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm h-fit">
-                    <h3 className="font-bold text-lg text-[#111318] dark:text-white mb-6">{activeTab === 'budget' ? 'Yeni Butce Hedefi' : 'Abonelik Ekle'}</h3>
+                    <h3 className="font-bold text-lg text-[#111318] dark:text-white mb-6">{activeTab === 'budget' ? 'Yeni Bütçe Hedefi' : 'Abonelik Ekle'}</h3>
 
                     {activeTab === 'budget' ? (
                         <form onSubmit={handleBudgetSubmit} className="space-y-4">
                             <select className="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-xl p-3 text-sm" value={budgetForm.category_name} onChange={(e) => setBudgetForm({ ...budgetForm, category_name: e.target.value })}>
                                 {VARIABLE_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
                             </select>
-                            <input type="number" className="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-xl p-3 text-sm" placeholder="Aylik limit" value={budgetForm.amount} onChange={(e) => setBudgetForm({ ...budgetForm, amount: e.target.value })} required />
+                            <input type="number" className="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-xl p-3 text-sm" placeholder="Aylık limit" value={budgetForm.amount} onChange={(e) => setBudgetForm({ ...budgetForm, amount: e.target.value })} required />
                             <button type="submit" className="w-full bg-[#135bec] text-white font-bold py-3 rounded-xl">Kaydet</button>
                         </form>
                     ) : (
                         <form onSubmit={handleSubSubmit} className="space-y-4">
-                            <input type="text" className="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-xl p-3 text-sm" placeholder="Abonelik adi" value={subForm.name} onChange={(e) => setSubForm({ ...subForm, name: e.target.value })} required />
+                            <input type="text" className="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-xl p-3 text-sm" placeholder="Abonelik adı" value={subForm.name} onChange={(e) => setSubForm({ ...subForm, name: e.target.value })} required />
                             <input type="number" className="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-xl p-3 text-sm" placeholder="Tutar" value={subForm.amount} onChange={(e) => setSubForm({ ...subForm, amount: e.target.value })} required />
                             <input type="date" className="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-xl p-3 text-sm" value={subForm.next_payment_date} onChange={(e) => setSubForm({ ...subForm, next_payment_date: e.target.value })} required />
                             <button type="submit" className="w-full bg-[#135bec] text-white font-bold py-3 rounded-xl">Ekle</button>
@@ -131,14 +141,22 @@ const Planning = () => {
                                 <div key={b.id} className="bg-white dark:bg-[#101622] p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
                                     <div className="flex justify-between items-center">
                                         <p className="font-bold">{b.category_name}</p>
-                                        <span className="text-xs font-bold text-slate-500">{new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY', maximumFractionDigits: 0 }).format(b.amount)}</span>
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-xs font-bold text-slate-500">{new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY', maximumFractionDigits: 0 }).format(b.amount)}</span>
+                                            <button onClick={() => handleDeleteBudget(b.id)} className="text-slate-300 hover:text-red-500 transition-colors" title="Sil">
+                                                <span className="material-icons-round text-sm">close</span>
+                                            </button>
+                                        </div>
                                     </div>
-                                    <p className="text-xs text-slate-500 mt-2">Harcanan: {new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY', maximumFractionDigits: 0 }).format(b.spent || 0)}</p>
+                                    <div className="flex justify-between items-center mt-2">
+                                        <p className="text-xs text-slate-500">Harcanan: {new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY', maximumFractionDigits: 0 }).format(b.spent || 0)}</p>
+                                        <p className={`text-xs font-bold ${(b.percentage || 0) > 90 ? 'text-red-500' : (b.percentage || 0) > 70 ? 'text-amber-500' : 'text-[#135bec]'}`}>%{Math.round(b.percentage || 0)}</p>
+                                    </div>
                                     <div className="h-2 bg-slate-100 dark:bg-slate-800 rounded-full mt-2 overflow-hidden">
-                                        <div className={`h-full ${b.percentage > 90 ? 'bg-red-500' : 'bg-[#135bec]'}`} style={{ width: `${Math.min(Number(b.percentage || 0), 100)}%` }}></div>
+                                        <div className={`h-full ${(b.percentage || 0) > 90 ? 'bg-red-500' : (b.percentage || 0) > 70 ? 'bg-amber-500' : 'bg-[#135bec]'}`} style={{ width: `${Math.min(Number(b.percentage || 0), 100)}%` }}></div>
                                     </div>
                                 </div>
-                            )) : <div className="col-span-2 text-center py-10 bg-slate-50 rounded-2xl border border-dashed border-slate-200">Hedef bulunamadi.</div>}
+                            )) : <div className="col-span-2 text-center py-10 bg-slate-50 rounded-2xl border border-dashed border-slate-200">Hedef bulunamadı.</div>}
                         </div>
                     ) : (
                         <div className="bg-white dark:bg-[#101622] rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
@@ -147,7 +165,7 @@ const Planning = () => {
                                     <tr>
                                         <th className="p-4">Platform</th>
                                         <th className="p-4">Tutar</th>
-                                        <th className="p-4">Sonraki Odeme</th>
+                                        <th className="p-4">Sonraki Ödeme</th>
                                         <th className="p-4"></th>
                                     </tr>
                                 </thead>
@@ -159,7 +177,7 @@ const Planning = () => {
                                             <td className="p-4 text-sm">{sub.next_payment_date ? new Date(sub.next_payment_date).toLocaleDateString('tr-TR') : '-'}</td>
                                             <td className="p-4 text-right"><button onClick={() => handleDeleteSubscription(sub.id)} className="text-xs bg-red-50 text-red-600 px-2 py-1 rounded">Sil</button></td>
                                         </tr>
-                                    )) : <tr><td colSpan="4" className="text-center py-8 text-slate-400 text-sm">Abonelik bulunamadi.</td></tr>}
+                                    )) : <tr><td colSpan="4" className="text-center py-8 text-slate-400 text-sm">Abonelik bulunamadı.</td></tr>}
                                 </tbody>
                             </table>
                         </div>

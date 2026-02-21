@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { api } from '../services/api';
 import { useToast } from '../context/ToastContext';
-import { resolveCategoryId } from '../constants/categories';
+import { resolveCategoryId, CATEGORY_OPTIONS } from '../constants/categories';
 
 const VoiceExpenseWizard = ({ onSave, onClose }) => {
     const toast = useToast();
@@ -176,12 +176,15 @@ const VoiceExpenseWizard = ({ onSave, onClose }) => {
                                 </div>
                                 <div>
                                     <label className="text-xs font-bold text-slate-500 uppercase">Kategori</label>
-                                    <input
-                                        type="text"
+                                    <select
                                         value={result.category_name}
                                         onChange={e => setResult({ ...result, category_name: e.target.value })}
                                         className="w-full p-2 bg-slate-50 rounded-lg border border-slate-200 text-sm font-medium"
-                                    />
+                                    >
+                                        {CATEGORY_OPTIONS.map((cat) => (
+                                            <option key={cat.id} value={cat.name}>{cat.name}</option>
+                                        ))}
+                                    </select>
                                 </div>
                                 <div>
                                     <label className="text-xs font-bold text-slate-500 uppercase">Tarih</label>

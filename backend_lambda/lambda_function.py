@@ -1227,6 +1227,22 @@ def handle_set_budget(user_id, body):
         release_db_connection(conn)
 
 
+def handle_delete_budget(user_id, budget_id):
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM budgets WHERE id=%s AND user_id=%s",
+                (budget_id, user_id),
+            )
+            if cur.rowcount == 0:
+                return api_response(404, {"error": "Budget not found"})
+            conn.commit()
+            return api_response(200, {"message": "Budget deleted"})
+    finally:
+        release_db_connection(conn)
+
+
 def handle_subscriptions(user_id, method, body, sub_id):
     conn = get_db_connection()
     try:
@@ -2698,9 +2714,7 @@ def handle_smart_extract(user_id, body):
     )
 
     try:
-        bedrock = boto3.client(service_name="bedrock-runtime", region_name=AWS_REGION)
-        
-        response = bedrock.converse(
+        response = bedrock_runtime.converse(
             modelId=BEDROCK_MODEL_ID,
             messages=[{"role": "user", "content": [{"text": prompt}]}],
             inferenceConfig={"maxTokens": 300, "temperature": 0}
@@ -2837,9 +2851,27 @@ def handle_dashboard(user_id):
             total_income = round(_safe_float(income_row["total"]), 2)
             net_balance = total_income - total_spent
 
-            # Get Top 3 Budgets
-            cur.execute("SELECT category_name, amount FROM budgets WHERE user_id=%s LIMIT 3", (user_id,))
-            budgets = cur.fetchall()
+            # Get Top 3 Budgets (with spent + percentage)
+            cur.execute("SELECT id, category_name, amount FROM budgets WHERE user_id=%s LIMIT 3", (user_id,))
+            budget_rows_dash = cur.fetchall()
+            cur.execute(
+                """
+                SELECT category_id, SUM(total_amount) AS spent
+                FROM receipts
+                WHERE user_id=%s AND status != 'deleted' AND TO_CHAR(receipt_date, 'YYYY-MM')=%s
+                GROUP BY category_id
+                """,
+                (user_id, period),
+            )
+            spent_dash = cur.fetchall()
+            spent_dash_map = {CATEGORIES.get(r["category_id"], "Diğer"): _safe_float(r["spent"]) for r in spent_dash}
+            budgets = []
+            for b in budget_rows_dash:
+                cat = b.get("category_name")
+                lim = _safe_float(b.get("amount"), 0.0)
+                sp = spent_dash_map.get(cat, 0.0)
+                pct = round((sp / lim) * 100, 1) if lim > 0 else 0.0
+                budgets.append({"id": str(b.get("id", "")), "category_name": cat, "amount": lim, "spent": sp, "percentage": pct})
 
             # Get Top 3 Subscriptions
             cur.execute("SELECT name, amount, next_payment_date FROM subscriptions WHERE user_id=%s ORDER BY next_payment_date ASC LIMIT 3", (user_id,))
@@ -3722,6 +3754,10 @@ def lambda_handler(event, context):
                 return handle_get_budgets(user_id)
             if method == "POST":
                 return handle_set_budget(user_id, body)
+        if path.startswith("/budgets/"):
+            budget_id = path.split("/")[2] if len(path.split("/")) > 2 else None
+            if budget_id and method == "DELETE":
+                return handle_delete_budget(user_id, budget_id)
         if path.startswith("/subscriptions"):
             parts = path.split("/")
             sub_id = parts[2] if len(parts) > 2 and parts[2] else None

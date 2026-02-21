@@ -17,6 +17,7 @@ import Insights from './pages/Insights';
 
 // Global Styles
 import './App.css';
+import ErrorBoundary from './components/ErrorBoundary';
 
 // Protected Route Component
 const ProtectedRoute = ({ children }) => {
@@ -42,68 +43,70 @@ function App() {
     <BrowserRouter>
       <AuthProvider>
         <ToastProvider>
-          <Routes>
-            {/* Public Routes */}
-            <Route path="/login" element={<Login />} />
+          <ErrorBoundary>
+            <Routes>
+              {/* Public Routes */}
+              <Route path="/login" element={<Login />} />
 
-            {/* Protected Routes */}
-            <Route path="/" element={
-              <ProtectedRoute>
-                <Dashboard />
-              </ProtectedRoute>
-            } />
+              {/* Protected Routes */}
+              <Route path="/" element={
+                <ProtectedRoute>
+                  <Dashboard />
+                </ProtectedRoute>
+              } />
 
-            <Route path="/add-expense" element={
-              <ProtectedRoute>
-                <AddExpense />
-              </ProtectedRoute>
-            } />
+              <Route path="/add-expense" element={
+                <ProtectedRoute>
+                  <AddExpense />
+                </ProtectedRoute>
+              } />
 
-            <Route path="/receipts" element={
-              <ProtectedRoute>
-                <Documents />
-              </ProtectedRoute>
-            } />
+              <Route path="/receipts" element={
+                <ProtectedRoute>
+                  <Documents />
+                </ProtectedRoute>
+              } />
 
-            <Route path="/receipts/:id" element={
-              <ProtectedRoute>
-                <ReceiptDetail />
-              </ProtectedRoute>
-            } />
+              <Route path="/receipts/:id" element={
+                <ProtectedRoute>
+                  <ReceiptDetail />
+                </ProtectedRoute>
+              } />
 
-            <Route path="/reports" element={
-              <ProtectedRoute>
-                <Reports />
-              </ProtectedRoute>
-            } />
+              <Route path="/reports" element={
+                <ProtectedRoute>
+                  <Reports />
+                </ProtectedRoute>
+              } />
 
-            <Route path="/budget" element={
-              <ProtectedRoute>
-                <Planning />
-              </ProtectedRoute>
-            } />
+              <Route path="/budget" element={
+                <ProtectedRoute>
+                  <Planning />
+                </ProtectedRoute>
+              } />
 
-            <Route path="/expenses" element={
-              <ProtectedRoute>
-                <Expenses />
-              </ProtectedRoute>
-            } />
+              <Route path="/expenses" element={
+                <ProtectedRoute>
+                  <Expenses />
+                </ProtectedRoute>
+              } />
 
-            <Route path="/incomes" element={
-              <ProtectedRoute>
-                <Incomes />
-              </ProtectedRoute>
-            } />
+              <Route path="/incomes" element={
+                <ProtectedRoute>
+                  <Incomes />
+                </ProtectedRoute>
+              } />
 
-            <Route path="/insights" element={
-              <ProtectedRoute>
-                <Insights />
-              </ProtectedRoute>
-            } />
+              <Route path="/insights" element={
+                <ProtectedRoute>
+                  <Insights />
+                </ProtectedRoute>
+              } />
 
-            {/* Catch-all Route */}
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
+              {/* Catch-all Route */}
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </ErrorBoundary>
         </ToastProvider>
       </AuthProvider>
     </BrowserRouter>

@@ -47,7 +47,6 @@ const Dashboard = () => {
         const fetchData = async () => {
             try {
                 const dashData = await api.getDashboardStats();
-                console.log("Dashboard Stats (Raw):", dashData);
                 setStats(dashData);
                 // Prioritize saved analysis from backend if available
                 if (dashData.saved_analysis) {
@@ -69,9 +68,7 @@ const Dashboard = () => {
     useEffect(() => {
         const fetchChart = async () => {
             try {
-                console.log(`Fetching chart data for Range: ${chartRange}, Type: ${chartType}`);
                 const res = await api.getChartData(chartRange, chartType);
-                console.log("Chart Data (Raw):", res);
                 setChartData(res.data || []);
             } catch (error) {
                 console.error("Chart fetch error:", error);
@@ -127,7 +124,17 @@ const Dashboard = () => {
 
         const colors = ['bg-indigo-500', 'bg-emerald-500', 'bg-amber-500', 'bg-rose-500', 'bg-cyan-500', 'bg-violet-500'];
         const bgColors = ['bg-indigo-50 text-indigo-700', 'bg-emerald-50 text-emerald-700', 'bg-amber-50 text-amber-700', 'bg-rose-50 text-rose-700', 'bg-cyan-50 text-cyan-700', 'bg-violet-50 text-violet-700'];
-        const icons = ['shopping_bag', 'restaurant', 'coffee', 'directions_car', 'receipt', 'theater_comedy'];
+
+        const iconMap = {
+            'Market': 'local_grocery_store',
+            'Restoran': 'restaurant',
+            'Kafe': 'coffee',
+            'Online Alışveriş': 'shopping_cart',
+            'Fatura': 'receipt_long',
+            'Konaklama': 'hotel',
+            'Ulaşım': 'directions_car',
+            'Diğer': 'more_horiz'
+        };
 
         return Object.entries(categories)
             .sort(([, a], [, b]) => b - a)
@@ -139,7 +146,7 @@ const Dashboard = () => {
                 color: bgColors[idx % bgColors.length],
                 bar: colors[idx % colors.length],
                 bg: bgColors[idx % bgColors.length].split(' ')[0],
-                icon: icons[idx % icons.length]
+                icon: iconMap[name] || 'category'
             }));
     }, [stats]);
 
@@ -206,7 +213,7 @@ const Dashboard = () => {
             </div>
 
             {/* Summary Cards */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+            <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
                 {/* Income */}
                 <div className="p-4 bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800">
                     <div className="flex items-center gap-2 mb-1">
@@ -238,6 +245,20 @@ const Dashboard = () => {
                     <h2 className={`text-xl font-bold tracking-tight ${netBalance >= 0 ? 'text-slate-900 dark:text-white' : 'text-red-600'}`}>
                         {currencyFormatter.format(netBalance)}
                     </h2>
+                </div>
+
+                {/* Goals Progress */}
+                <div className="p-4 bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800">
+                    <div className="flex items-center gap-2 mb-1">
+                        <div className="p-1 rounded bg-amber-50 text-amber-600"><span className="material-icons-round text-sm">flag</span></div>
+                        <p className="text-slate-500 font-bold text-[10px] uppercase">Hedef İlerleme</p>
+                    </div>
+                    <h2 className="text-xl font-bold text-amber-600 dark:text-amber-400 tracking-tight">
+                        %{Math.round(stats?.goals_summary?.active_progress_pct || 0)}
+                    </h2>
+                    <p className="text-[10px] text-slate-400 mt-0.5">
+                        {stats?.goals_summary?.active_count || 0} aktif hedef
+                    </p>
                 </div>
 
                 {/* Forecast */}
@@ -359,10 +380,10 @@ const Dashboard = () => {
                                     <div key={i}>
                                         <div className="flex justify-between text-[10px] mb-1 font-medium">
                                             <span className="text-slate-700">{b.category_name}</span>
-                                            <span className="text-slate-500">{currencyFormatter.format(b.amount)} Limit</span>
+                                            <span className="text-slate-500">{b.spent ? `${currencyFormatter.format(b.spent)} / ` : ''}{currencyFormatter.format(b.amount)}</span>
                                         </div>
                                         <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
-                                            <div className="h-full bg-slate-300 w-1/2 rounded-full"></div>
+                                            <div className={`h-full rounded-full ${(b.percentage || 0) > 90 ? 'bg-red-500' : (b.percentage || 0) > 70 ? 'bg-amber-500' : 'bg-indigo-500'}`} style={{ width: `${Math.min(Number(b.percentage || 0), 100)}%` }}></div>
                                         </div>
                                     </div>
                                 )) : <p className="text-xs text-slate-400">Bütçe hedefi bulunamadı.</p>}
@@ -439,10 +460,17 @@ const Dashboard = () => {
                                         const txt = typeof insight === 'string'
                                             ? insight
                                             : (insight.summary || insight.title || insight.text || 'AI İçgörü');
-                                        const type = typeof insight === 'object' && insight.priority === 'HIGH' ? 'warning' : 'info';
+                                        const priority = typeof insight === 'object' ? insight.priority : 'LOW';
+                                        const priorityConfig = {
+                                            HIGH: { icon: 'warning', bg: 'bg-red-50 dark:bg-red-900/20', text: 'text-red-700 dark:text-red-300', iconColor: 'text-red-500' },
+                                            MEDIUM: { icon: 'info', bg: 'bg-blue-50 dark:bg-blue-900/20', text: 'text-blue-700 dark:text-blue-300', iconColor: 'text-blue-500' },
+                                            LOW: { icon: 'lightbulb', bg: 'bg-slate-50 dark:bg-slate-800', text: 'text-slate-600 dark:text-slate-400', iconColor: 'text-slate-400' }
+                                        };
+                                        const cfg = priorityConfig[priority] || priorityConfig.LOW;
                                         return (
-                                            <div key={idx} className="flex gap-2 text-xs text-slate-600 dark:text-slate-400">
-                                                <span className="flex-1">{txt}</span>
+                                            <div key={idx} className={`flex gap-2 text-xs p-2 rounded-lg ${cfg.bg}`}>
+                                                <span className={`material-icons-round text-sm mt-0.5 shrink-0 ${cfg.iconColor}`}>{cfg.icon}</span>
+                                                <span className={`flex-1 font-medium ${cfg.text}`}>{txt}</span>
                                             </div>
                                         );
                                     })}

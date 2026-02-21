@@ -141,6 +141,7 @@ export const api = {
 
     getBudgets: () => fetchWithAuth('/budgets'),
     setBudget: (data) => fetchWithAuth('/budgets', { method: 'POST', body: JSON.stringify(data) }),
+    deleteBudget: (id) => fetchWithAuth(`/budgets/${id}`, { method: 'DELETE' }),
 
     getSubscriptions: () => fetchWithAuth('/subscriptions'),
     addSubscription: (data) => fetchWithAuth('/subscriptions', { method: 'POST', body: JSON.stringify(data) }),

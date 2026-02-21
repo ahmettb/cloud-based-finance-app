@@ -33,7 +33,7 @@ logger.setLevel(os.environ.get('LOG_LEVEL', 'INFO'))
 
 AWS_REGION = os.environ.get('AWS_REGION', 'us-east-1')
 BEDROCK_MODEL_ID = os.environ.get('BEDROCK_MODEL_ID', 'anthropic.claude-3-haiku-20240307-v1:0')
-LLM_MAX_TOKENS = int(os.environ.get('LLM_MAX_TOKENS', '400'))
+LLM_MAX_TOKENS = int(os.environ.get('LLM_MAX_TOKENS', '700'))
 LLM_TEMPERATURE = float(os.environ.get('LLM_TEMPERATURE', '0.25'))
 ANOMALY_Z_THRESHOLD = float(os.environ.get('ANOMALY_Z_THRESHOLD', '2.0'))
 ANOMALY_IQR_FACTOR = float(os.environ.get('ANOMALY_IQR_FACTOR', '1.5'))
@@ -721,19 +721,25 @@ class InsightBuilder:
             return []
         cards = []
         for a in anomalies[:5]:
+            actions = [
+                f"{a['merchant']} harcamasını gözden geçirin, gerekli mi değerlendirin.",
+                'Benzer tutardaki geçmiş işlemleri karşılaştırın.'
+            ]
+            if a.get('z_score', 0) > 3:
+                actions.append('Bu işlem çok yüksek sapma gösteriyor, hatalı giriş olabilir.')
             cards.append({
                 'id': InsightBuilder._next_id('anomaly'),
                 'type': 'anomaly_detection',
                 'priority': a.get('severity', 'MEDIUM'),
-                'title': f"Olağan dışı harcama: {a['merchant']}",
-                'summary': f"{a['merchant']}'de {a['amount']:.0f} TL harcama. "
-                           f"Z-skor: {a['z_score']:.1f} ({a['detection_method']})",
+                'title': f"Olağandışı harcama: {a['merchant']}",
+                'summary': f"{a['merchant']}'de {a['amount']:.0f} TL harcama tespit edildi. "
+                           f"Ortalamadan {a['z_score']:.1f}x sapma ({a['detection_method']}).",
                 'confidence': _confidence(10, min(a['z_score'] / 4, 1.0)),
                 'explanation': {
                     'reason': f"{a['detection_method']} ile tespit edildi",
                     'data_points': [
                         f"Tutar: {a['amount']:.0f} TL",
-                        f"Z-skor: {a['z_score']:.1f} (esik: {ANOMALY_Z_THRESHOLD})",
+                        f"Z-skor: {a['z_score']:.1f} (eşik: {ANOMALY_Z_THRESHOLD})",
                         f"Kategori: {a.get('category', '?')}"
                     ],
                     'detection_method': a['detection_method']
@@ -742,7 +748,7 @@ class InsightBuilder:
                     {'metric': 'tutar', 'value': a['amount'], 'unit': 'TL'},
                     {'metric': 'z_score', 'value': a['z_score'], 'unit': ''}
                 ],
-                'actions': []
+                'actions': actions
             })
         return cards
 
@@ -752,23 +758,39 @@ class InsightBuilder:
         if not forecast or forecast.get('next_month_estimate', 0) <= 0:
             return []
         trend_text = {
-            'up': 'Artış bekleniyor',
-            'down': 'Düşüş bekleniyor',
+            'up': 'Artış eğiliminde',
+            'down': 'Düşüş eğiliminde',
             'stable': 'Stabil görünüyor'
         }
+        trend = forecast.get('trend', 'stable')
+        actions = []
+        if trend == 'up':
+            actions = [
+                'Bütçe limitlerini bu ay için gözden geçirin.',
+                'En çok artan kategoriyi tespit edip kısıntı yapın.'
+            ]
+        elif trend == 'down':
+            actions = [
+                'Tasarruf hedefinizi artırabilirsiniz.',
+                'Düşüş trendini korumak için mevcut alışkanlıkları sürdürün.'
+            ]
+        else:
+            actions = [
+                'Harcama dengenizi koruyun, bütçe takibine devam edin.'
+            ]
         return [{
             'id': InsightBuilder._next_id('forecast'),
             'type': 'budget_forecast',
-            'priority': 'HIGH' if forecast.get('trend') == 'up' else 'MEDIUM',
+            'priority': 'HIGH' if trend == 'up' else 'MEDIUM',
             'title': f"Gelecek ay tahmini: {forecast['next_month_estimate']:.0f} TL",
-            'summary': f"{trend_text.get(forecast.get('trend'), 'Stabil')}. "
-                       f"Güven: %{forecast.get('confidence_score', 50)}.",
+            'summary': f"Harcamalar {trend_text.get(trend, 'stabil')}. "
+                       f"Güven skoru: %{forecast.get('confidence_score', 50)}.",
             'confidence': forecast.get('confidence_score', 50),
             'evidence': [
                 {'metric': 'tahmin', 'value': forecast['next_month_estimate'], 'unit': 'TL'},
                 {'metric': 'trend', 'value': forecast.get('trend_pct', 0), 'unit': '%'}
             ],
-            'actions': []
+            'actions': actions
         }]
 
     @staticmethod
@@ -909,7 +931,25 @@ class InsightBuilder:
                         'Abonelikleri kontrol edip en az birini durdur.'
                     ]
                 })
-            elif period_net > 0 and savings_rate >= 15:
+            elif savings_rate < 15:
+                cards.append({
+                    'id': InsightBuilder._next_id('health'),
+                    'type': 'financial_health',
+                    'priority': 'MEDIUM',
+                    'title': 'Tasarruf oranı iyileştirilebilir',
+                    'summary': f'Tasarruf oranınız %{savings_rate:.1f}. İdeal seviye olan %20\'ye ulaşmak için harcamalarınızı gözden geçirin.',
+                    'confidence': 85,
+                    'evidence': [
+                        {'metric': 'gelir', 'value': period_income, 'unit': 'TL'},
+                        {'metric': 'gider', 'value': period_spent, 'unit': 'TL'},
+                        {'metric': 'tasarruf_oranı', 'value': savings_rate, 'unit': '%'},
+                    ],
+                    'actions': [
+                        'En yüksek harcama kategorisinde %10 azaltmayı dene.',
+                        'Tasarruf hedefi oluşturup düzenli birikim başlat.'
+                    ]
+                })
+            else:
                 cards.append({
                     'id': InsightBuilder._next_id('health'),
                     'type': 'financial_health',
@@ -925,6 +965,39 @@ class InsightBuilder:
                         'Bu dengeyi korumak için sabit giderleri aylık bir kez gözden geçir.'
                     ]
                 })
+
+            # Gelir insight karti – kullanici her zaman gelir durumunu gorsun
+            cards.append({
+                'id': InsightBuilder._next_id('income'),
+                'type': 'income_analysis',
+                'priority': 'LOW',
+                'title': f'Aylık geliriniz {period_income:,.0f} TL',
+                'summary': f'Bu ay {period_income:,.0f} TL gelire karşı {period_spent:,.0f} TL harcama gerçekleşti. Net bakiye {period_net:,.0f} TL.',
+                'confidence': 95,
+                'evidence': [
+                    {'metric': 'gelir', 'value': period_income, 'unit': 'TL'},
+                    {'metric': 'gider', 'value': period_spent, 'unit': 'TL'},
+                    {'metric': 'net', 'value': period_net, 'unit': 'TL'},
+                ],
+                'actions': [
+                    'Gelirinizi çeşitlendirmek için ek gelir kaynakları araştırın.',
+                    'Düzenli gelirinizi otomatik tasarrufa yönlendirin.'
+                ]
+            })
+        elif period_spent > 0:
+            # Gelir bilgisi yok ama harcama var 
+            cards.append({
+                'id': InsightBuilder._next_id('health'),
+                'type': 'financial_health',
+                'priority': 'MEDIUM',
+                'title': 'Gelir bilgisi eksik',
+                'summary': f'Bu ay {period_spent:.0f} TL harcama tespit edildi ancak gelir kaydı bulunamadı. Gelir bilginizi ekleyerek doğru analiz yapılmasını sağlayın.',
+                'confidence': 90,
+                'evidence': [{'metric': 'gider', 'value': period_spent, 'unit': 'TL'}],
+                'actions': [
+                    'Gelirlerinizi sisteme ekleyerek tam finansal görünüm elde edin.'
+                ]
+            })
 
         active_goals = [g for g in (goals or []) if str(g.get('status', 'active')).lower() == 'active']
         if active_goals:
@@ -968,17 +1041,21 @@ class LLMEnricher:
     """
 
     SYSTEM_PROMPT = (
-        "Rol: T\u00fcrk\u00e7e finans ko\u00e7u (samimi, motive edici, analitik).\\n"
-        "G\u00f6rev: Verilen JSON verilerini analiz et ve kullan\u0131c\u0131ya \u00f6zg\u00fcn, ak\u0131c\u0131 bir \u00f6zet sun.\\n"
-        "Kurallar:\\n"
-        "- 'Ayl\u0131k De\u011ferlendirme' gibi ba\u015fl\u0131klar atma. Do\u011frudan konuya gir.\\n"
-        "- \u015eablon c\u00fcmleler kullanma. Veriye \u00f6zel konu\u015f.\\n"
-        "- E\u011fer harcama artm\u0131\u015fsa uyar, azalm\u0131\u015fsa tebrik et.\\n"
-        "- Sadece JSON d\u00f6nd\u00fcr.\\n"
-        "- T\u00fcrk\u00e7e karakterleri do\u011fru kullan: \u011f, \u00fc, \u015f, \u0131, \u00f6, \u00e7.\\n"
-        "JSON Format:\\n"
-        '{"coach":{"headline":"\u00c7arp\u0131c\u0131 ba\u015fl\u0131k (max 60)","summary":"Ak\u0131c\u0131 paragraf (max 250)","focus_areas":["str","str"]},'
-        '"card_enrichments":[{"id":"card_id","title":"max 70char","summary":"max 160char","actions":["str","str"]}]}'
+        "Türkçe kişisel finans koçusun. Samimi, motive edici ve veriye dayalı konuş.\n"
+        "Görev: Verilen finansal verileri yorumla, kullanıcıya özgün ve akıcı bir özet sun.\n"
+        "Kurallar:\n"
+        "- Şablon cümleler kullanma, veriye özel konuş.\n"
+        "- Harcama artmışsa uyar, azalmışsa tebrik et.\n"
+        "- Yatırım tavsiyesi verme.\n"
+        "- Sadece JSON döndür, başka metin ekleme.\n"
+        "- Türkçe karakterleri doğru kullan.\n"
+        "JSON Format:\n"
+        '{"coach":{"headline":"max 60 karakter başlık","summary":"Detaylı paragraf max 450 karakter. Kullanıcının durumunu özetle, önemli trendleri vurgula, somut öneri ver.","focus_areas":["odak1","odak2"]},'
+        '"card_enrichments":[{"id":"card_id","title":"max 70 karakter","summary":"max 160 karakter","actions":["aksiyon1","aksiyon2"]}]}\n'
+        "Örnek çıktı 1 (iyi ay):\n"
+        '{"coach":{"headline":"Tasarruf oranın yükseliyor, harika gidiyorsun!","summary":"Bu ay 8500 TL harcadın, geçen aya göre %12 düşüş var. Market harcamaların kontrol altında. Restoran kategorisinde küçük bir artış var ama genel tablo çok olumlu. Bu tempoyu korursan yıl sonuna kadar 15000 TL biriktirebilirsin.","focus_areas":["Restoran harcamalarını takip et","Birikim hedefini artır"]},"card_enrichments":[]}\n'
+        "Örnek çıktı 2 (dikkat gereken ay):\n"
+        '{"coach":{"headline":"Bu ay harcamalar beklenenin üstünde","summary":"12400 TL harcama ile bütçeni %18 aştın. Online alışveriş kategorisi geçen aya göre iki katına çıkmış. Fatura ödemeleri normal seyrinde ama market harcamalarında %25 artış dikkat çekici. Gelecek ay için online alışverişe limit koyman faydalı olacaktır.","focus_areas":["Online alışverişe limit koy","Market alışverişinde liste yap"]},"card_enrichments":[]}'
     )
 
     @staticmethod
@@ -1312,6 +1389,9 @@ def run_analysis(payload):
     except Exception as e:
         logger.error(f"[{request_id}] Financial health insight error: {e}", exc_info=True)
 
+    # Step 4c: Financial Health Score (0-100)
+    health_score = _compute_health_score(financial_health, budgets, anomalies, goals)
+
     # Sort insights by priority (HIGH first)
     priority_order = {'HIGH': 0, 'MEDIUM': 1, 'LOW': 2}
     all_insights.sort(key=lambda c: priority_order.get(c.get('priority', 'LOW'), 2))
@@ -1350,6 +1430,7 @@ def run_analysis(payload):
         'patterns': all_patterns,
         'next_actions': next_actions,
         'financial_health': financial_health,
+        'health_score': health_score,
         'goals_summary': {
             'active_count': len([g for g in goals if str(g.get('status', 'active')).lower() == 'active']),
             'total_count': len(goals),
@@ -1357,7 +1438,7 @@ def run_analysis(payload):
         'meta': {
             'model_version': BEDROCK_MODEL_ID,
             'generated_at': datetime.utcnow().isoformat() + 'Z',
-            'analysis_version': 'v6',
+            'analysis_version': 'v7',
             'period': period,
             'cache_key': cache_key,
             'llm_observability': llm_obs,
@@ -1374,6 +1455,86 @@ def run_analysis(payload):
                  f"{len(anomalies)} anomalies, forecast={forecast.get('next_month_estimate',0):.0f}")
 
     return response
+
+
+def _compute_health_score(financial_health, budgets, anomalies, goals):
+    """Finansal saglik skoru 0-100. Kullaniciya tek bakista durum ozeti verir."""
+    score = 50  # Baslangic
+    breakdown = {}
+
+    # 1. Tasarruf orani (%30 agirlik)
+    savings_rate = _sf(financial_health.get('savings_rate', 0))
+    if savings_rate >= 20:
+        s_score = 30
+    elif savings_rate >= 10:
+        s_score = 20
+    elif savings_rate >= 0:
+        s_score = 10
+    else:
+        s_score = 0
+    breakdown['savings'] = s_score
+
+    # 2. Butceye uyum (%25 agirlik)
+    if budgets:
+        over_count = sum(1 for b in budgets if _sf(b.get('pct', 0)) > 100)
+        ratio = 1 - (over_count / len(budgets))
+        b_score = int(25 * ratio)
+    else:
+        b_score = 12  # Butce yoksa orta puan
+    breakdown['budget'] = b_score
+
+    # 3. Harcama trendi (%20 agirlik)
+    period_net = _sf(financial_health.get('period_net', 0))
+    if period_net > 0:
+        t_score = 20
+    elif period_net >= -500:
+        t_score = 10
+    else:
+        t_score = 0
+    breakdown['trend'] = t_score
+
+    # 4. Hedef ilerleme (%15 agirlik)
+    active_goals = [g for g in (goals or []) if str(g.get('status', 'active')).lower() == 'active']
+    if active_goals:
+        progresses = []
+        for g in active_goals:
+            target = _sf(g.get('target_amount'))
+            current = _sf(g.get('current_amount'))
+            if target > 0:
+                progresses.append(min(current / target, 1.0))
+        avg_prog = (sum(progresses) / len(progresses)) if progresses else 0.5
+        g_score = int(15 * avg_prog)
+    else:
+        g_score = 8
+    breakdown['goals'] = g_score
+
+    # 5. Anomali yoklugu (%10 agirlik)
+    anom_count = len(anomalies) if anomalies else 0
+    if anom_count == 0:
+        a_score = 10
+    elif anom_count <= 2:
+        a_score = 5
+    else:
+        a_score = 0
+    breakdown['anomalies'] = a_score
+
+    score = sum(breakdown.values())
+    score = _clamp(score, 0, 100)
+
+    if score >= 80:
+        label = 'Mükemmel'
+    elif score >= 60:
+        label = 'İyi'
+    elif score >= 40:
+        label = 'Orta'
+    else:
+        label = 'Dikkat Gerekli'
+
+    return {
+        'score': score,
+        'label': label,
+        'breakdown': breakdown
+    }
 
 
 def _build_next_actions(insights):
@@ -1405,7 +1566,11 @@ def _build_next_actions(insights):
             seen.add(key)
             unique.append(a)
 
-    return unique[:8]
+    return unique[:8] if unique else [
+        {'title': 'Harcamalarınızı düzenli olarak gözden geçirin.', 'source_insight': None, 'priority': 'MEDIUM', 'due_in_days': 7},
+        {'title': 'Aylık bütçe hedeflerinizi belirleyin.', 'source_insight': None, 'priority': 'MEDIUM', 'due_in_days': 14},
+        {'title': 'Tasarruf hedefi oluşturup ilerlemenizi takip edin.', 'source_insight': None, 'priority': 'LOW', 'due_in_days': 14},
+    ]
 
 
 # ============================================================

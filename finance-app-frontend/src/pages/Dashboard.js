@@ -479,6 +479,35 @@ const Dashboard = () => {
                         </div>
                     )}
 
+                    {/* Weekly AI Summary: Bu Hafta Ne Yapmalıyım? */}
+                    {(analysis?.next_actions?.length > 0) && (
+                        <div className="bg-gradient-to-r from-emerald-500 to-teal-500 rounded-xl p-5 shadow-lg text-white">
+                            <div className="flex items-center gap-2 mb-4">
+                                <span className="material-icons-round text-2xl text-emerald-100">task_alt</span>
+                                <h3 className="font-bold text-lg">Bu Hafta Ne Yapmalıyım?</h3>
+                            </div>
+                            <div className="space-y-3">
+                                {analysis.next_actions.slice(0, 3).map((action, i) => (
+                                    <div key={i} className="bg-white/10 hover:bg-white/20 transition-colors backdrop-blur-sm p-3 rounded-lg border border-white/20 flex gap-3">
+                                        <button onClick={() => navigate('/insights')} className="shrink-0 w-6 h-6 rounded-md border-2 border-white/40 flex items-center justify-center hover:bg-white inset-0 mt-0.5 group">
+                                            <span className="material-icons-round text-xs opacity-0 group-hover:opacity-100 text-emerald-600">done</span>
+                                        </button>
+                                        <div>
+                                            <p className="font-bold text-sm leading-tight mb-1">{action.title}</p>
+                                            <p className="text-xs text-emerald-100 flex items-center gap-1">
+                                                <span className="material-icons-round text-[10px]">schedule</span>
+                                                {action.due_in_days} gün içinde
+                                            </p>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                            <button onClick={() => navigate('/insights')} className="mt-4 w-full bg-white text-emerald-700 text-xs font-bold py-2.5 rounded-lg shadow-sm hover:bg-emerald-50 transition-colors">
+                                Tüm Aksiyonları Görüntüle & Yönet
+                            </button>
+                        </div>
+                    )}
+
 
                     {/* Categories */}
                     <div className="bg-white dark:bg-slate-900 p-5 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800">
@@ -505,23 +534,7 @@ const Dashboard = () => {
                         </div>
                     </div>
 
-                    {/* AI Actions */}
-                    {(analysis?.next_actions?.length > 0) && (
-                        <div className="bg-white dark:bg-slate-900 p-5 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800">
-                            <h3 className="font-bold text-slate-800 dark:text-white text-sm mb-3">Önerilen Aksiyonlar</h3>
-                            <div className="space-y-2">
-                                {analysis.next_actions.slice(0, 3).map((action, i) => (
-                                    <div key={i} className="flex items-start gap-2 p-2 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700">
-                                        <span className={`h-1.5 w-1.5 rounded-full mt-1.5 shrink-0 ${action.priority === 'HIGH' ? 'bg-red-500' : 'bg-blue-500'}`}></span>
-                                        <div>
-                                            <p className="text-xs font-medium text-slate-700 dark:text-slate-300 line-clamp-2">{action.title}</p>
-                                            <p className="text-[9px] text-slate-400">{action.due_in_days} gün içinde</p>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    )}
+
                 </div>
             </div>
 

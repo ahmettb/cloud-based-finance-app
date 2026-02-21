@@ -241,6 +241,23 @@ export const api = {
     deleteAIAction: (id) => fetchWithAuth(`/ai-actions/${id}`, {
         method: 'DELETE'
     }),
+    applyAIAction: (id, data) => fetchWithAuth(`/ai-actions/${id}/apply`, {
+        method: 'POST',
+        body: JSON.stringify(data)
+    }),
+
+    // Receipt Items CRUD
+    addReceiptItem: (receiptId, data) => fetchWithAuth(`/receipts/${receiptId}/items`, {
+        method: 'POST',
+        body: JSON.stringify(data)
+    }),
+    updateReceiptItem: (receiptId, itemId, data) => fetchWithAuth(`/receipts/${receiptId}/items/${itemId}`, {
+        method: 'PUT',
+        body: JSON.stringify(data)
+    }),
+    deleteReceiptItem: (receiptId, itemId) => fetchWithAuth(`/receipts/${receiptId}/items/${itemId}`, {
+        method: 'DELETE'
+    }),
 
     getGoals: () => fetchWithAuth('/goals'),
     createGoal: (data) => fetchWithAuth('/goals', {
@@ -304,6 +321,16 @@ export const api = {
     }),
 
     deleteIncome: (id) => fetchWithAuth(`/incomes/${id}`, { method: 'DELETE' }),
+
+    updateIncome: (id, data) => fetchWithAuth(`/incomes/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(data)
+    }),
+
+    updateSubscription: (id, data) => fetchWithAuth(`/subscriptions/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(data)
+    }),
 
     updateReceipt: (id, data) => fetchWithAuth(`/receipts/${id}`, {
         method: 'PUT',

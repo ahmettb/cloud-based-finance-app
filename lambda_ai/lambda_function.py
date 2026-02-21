@@ -1040,23 +1040,32 @@ class LLMEnricher:
     Claude HESAPLAMA YAPMAZ, sadece mevcut sonuclari yorumlar.
     """
 
-    SYSTEM_PROMPT = (
-        "Türkçe kişisel finans koçusun. Samimi, motive edici ve veriye dayalı konuş.\n"
-        "Görev: Verilen finansal verileri yorumla, kullanıcıya özgün ve akıcı bir özet sun.\n"
-        "Kurallar:\n"
-        "- Şablon cümleler kullanma, veriye özel konuş.\n"
-        "- Harcama artmışsa uyar, azalmışsa tebrik et.\n"
-        "- Yatırım tavsiyesi verme.\n"
-        "- Sadece JSON döndür, başka metin ekleme.\n"
-        "- Türkçe karakterleri doğru kullan.\n"
-        "JSON Format:\n"
-        '{"coach":{"headline":"max 60 karakter başlık","summary":"Detaylı paragraf max 450 karakter. Kullanıcının durumunu özetle, önemli trendleri vurgula, somut öneri ver.","focus_areas":["odak1","odak2"]},'
-        '"card_enrichments":[{"id":"card_id","title":"max 70 karakter","summary":"max 160 karakter","actions":["aksiyon1","aksiyon2"]}]}\n'
-        "Örnek çıktı 1 (iyi ay):\n"
-        '{"coach":{"headline":"Tasarruf oranın yükseliyor, harika gidiyorsun!","summary":"Bu ay 8500 TL harcadın, geçen aya göre %12 düşüş var. Market harcamaların kontrol altında. Restoran kategorisinde küçük bir artış var ama genel tablo çok olumlu. Bu tempoyu korursan yıl sonuna kadar 15000 TL biriktirebilirsin.","focus_areas":["Restoran harcamalarını takip et","Birikim hedefini artır"]},"card_enrichments":[]}\n'
-        "Örnek çıktı 2 (dikkat gereken ay):\n"
-        '{"coach":{"headline":"Bu ay harcamalar beklenenin üstünde","summary":"12400 TL harcama ile bütçeni %18 aştın. Online alışveriş kategorisi geçen aya göre iki katına çıkmış. Fatura ödemeleri normal seyrinde ama market harcamalarında %25 artış dikkat çekici. Gelecek ay için online alışverişe limit koyman faydalı olacaktır.","focus_areas":["Online alışverişe limit koy","Market alışverişinde liste yap"]},"card_enrichments":[]}'
-    )
+    @staticmethod
+    def get_system_prompt(persona="friendly"):
+        persona_instructions = {
+            "friendly": "Samimi, motive edici ve destekleyici bir ton kullan.",
+            "professional": "Resmi, objektif, net ve ciddi bir finansal danışman dili kullan.",
+            "strict": "Disiplinli, kuralcı, talepkar ve yer yer uyarıcı (sert) bir ton kullan.",
+            "humorous": "Esprili, eğlenceli ve mizahi bir dil kullan, araya şakalar kat."
+        }
+        tone = persona_instructions.get(persona, persona_instructions["friendly"])
+        return (
+            f"Türkçe kişisel finans koçusun. {tone}\n"
+            "Görev: Verilen finansal verileri yorumla, kullanıcıya özgün ve akıcı bir özet sun.\n"
+            "Kurallar:\n"
+            "- Şablon cümleler kullanma, veriye özel konuş.\n"
+            "- Harcama artmışsa uyar, azalmışsa tebrik et.\n"
+            "- Yatırım tavsiyesi verme.\n"
+            "- Sadece JSON döndür, başka metin ekleme.\n"
+            "- Türkçe karakterleri doğru kullan.\n"
+            "JSON Format:\n"
+            '{"coach":{"headline":"max 60 karakter başlık","summary":"Detaylı paragraf max 450 karakter. Kullanıcının durumunu özetle, önemli trendleri vurgula, somut öneri ver.","focus_areas":["odak1","odak2"]},'
+            '"card_enrichments":[{"id":"card_id","title":"max 70 karakter","summary":"max 160 karakter","actions":["aksiyon1","aksiyon2"]}]}\n'
+            "Örnek çıktı 1 (iyi ay):\n"
+            '{"coach":{"headline":"Tasarruf oranın yükseliyor, harika gidiyorsun!","summary":"Bu ay 8500 TL harcadın, geçen aya göre %12 düşüş var. Market harcamaların kontrol altında. Restoran kategorisinde küçük bir artış var ama genel tablo çok olumlu. Bu tempoyu korursan yıl sonuna kadar 15000 TL biriktirebilirsin.","focus_areas":["Restoran harcamalarını takip et","Birikim hedefini artır"]},"card_enrichments":[]}\n'
+            "Örnek çıktı 2 (dikkat gereken ay):\n"
+            '{"coach":{"headline":"Bu ay harcamalar beklenenin üstünde","summary":"12400 TL harcama ile bütçeni %18 aştın. Online alışveriş kategorisi geçen aya göre iki katına çıkmış. Fatura ödemeleri normal seyrinde ama market harcamalarında %25 artış dikkat çekici. Gelecek ay için online alışverişe limit koyman faydalı olacaktır.","focus_areas":["Online alışverişe limit koy","Market alışverişinde liste yap"]},"card_enrichments":[]}'
+        )
 
     @staticmethod
     def _build_prompt(period, insights, forecast, patterns):
@@ -1096,12 +1105,14 @@ class LLMEnricher:
         return "\n".join(lines)
 
     @staticmethod
-    def enrich(period, insights, forecast, patterns):
+    def enrich(period, insights, forecast, patterns, persona="friendly"):
         """Claude ile zenginlestirme. Basarisiz olursa fallback doner."""
         if not insights:
             return insights, LLMEnricher._fallback_coach(period, forecast), {}
 
-        prompt = LLMEnricher._build_prompt(period, insights, forecast, patterns)
+        prompt_text = LLMEnricher._build_prompt(period, insights, forecast, patterns)
+        system_message_content = LLMEnricher.get_system_prompt(persona)
+
         llm_obs = {'status': 'skipped'}  # Observability record
 
         try:
@@ -1110,13 +1121,13 @@ class LLMEnricher:
                 "anthropic_version": "bedrock-2023-05-31",
                 "max_tokens": LLM_MAX_TOKENS,
                 "temperature": LLM_TEMPERATURE,
-                "system": LLMEnricher.SYSTEM_PROMPT,
-                "messages": [{"role": "user", "content": prompt}]
+                "system": system_message_content,
+                "messages": [{"role": "user", "content": prompt_text}]
             }
 
             # â”€â”€ Sanitized prompt logging (no PII) â”€â”€
-            logger.info(f"LLM prompt size: {len(prompt)} chars, ~{len(prompt.split())} tokens")
-            logger.info(f"LLM prompt preview: {_compact_text(prompt, 140)}...")
+            logger.info(f"LLM prompt size: {len(prompt_text)} chars, ~{len(prompt_text.split())} tokens")
+            logger.info(f"LLM prompt preview: {_compact_text(prompt_text, 140)}...")
 
             # â”€â”€ Lazy Bedrock init â”€â”€
             client = _get_bedrock()
@@ -1320,6 +1331,8 @@ def run_analysis(payload):
     all_insights = []
     all_patterns = {}
 
+    persona = payload.get('persona', 'friendly')
+
     # Az veri durumunda LLM zenginlestirme genelde dusuk deger/ek maliyet.
     auto_skip_llm = len(transactions) < 6 and len(monthly_totals) < 2
     skip_llm = bool(input_skip_llm or auto_skip_llm)
@@ -1401,7 +1414,7 @@ def run_analysis(payload):
     if not skip_llm:
         step_start = time.time()
         try:
-            all_insights, coach, llm_obs = LLMEnricher.enrich(period, all_insights, forecast, all_patterns)
+            all_insights, coach, llm_obs = LLMEnricher.enrich(period, all_insights, forecast, all_patterns, persona)
             logger.info(f"[{request_id}] LLM enrichment done in {(time.time()-step_start)*1000:.0f}ms")
         except Exception as e:
             logger.error(f"[{request_id}] LLM enrichment error: {e}", exc_info=True)

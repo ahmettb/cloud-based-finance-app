@@ -2,10 +2,12 @@ import React, { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import DashboardLayout from '../components/layout/DashboardLayout';
 import { api } from '../services/api';
+import { useToast } from '../context/ToastContext';
 import { CATEGORY_OPTIONS, CATEGORY_ID_TO_NAME, resolveCategoryId } from '../constants/categories';
 
 const AddExpense = () => {
     const navigate = useNavigate();
+    const toast = useToast();
     const fileInputRef = useRef(null);
     const [activeTab, setActiveTab] = useState('manual');
     const [loading, setLoading] = useState(false);
@@ -23,8 +25,8 @@ const AddExpense = () => {
     const categories = CATEGORY_OPTIONS;
 
     const paymentMethods = [
-        { id: 'credit_card', name: 'Kredi Karti' },
-        { id: 'debit_card', name: 'Banka Karti' },
+        { id: 'credit_card', name: 'Kredi Kartı' },
+        { id: 'debit_card', name: 'Banka Kartı' },
         { id: 'cash', name: 'Nakit' },
         { id: 'transfer', name: 'Havale/EFT' }
     ];
@@ -62,13 +64,13 @@ const AddExpense = () => {
                 date: result.receipt_date || new Date().toISOString().split('T')[0],
                 amount: result.total_amount || '',
                 category: inferredCategory,
-                description: 'Otomatik fis tarama ile eklendi'
+                description: 'Otomatik fiş tarama ile eklendi'
             }));
 
             setActiveTab('manual');
         } catch (error) {
             console.error(error);
-            alert(`Fis okunamadi: ${error.message || 'Bilinmeyen hata'}`);
+            toast.show.error(`Fiş okunamadı: ${error.message || 'Bilinmeyen hata'}`);
             setUploadStep('idle');
         } finally {
             setLoading(false);
@@ -103,7 +105,7 @@ const AddExpense = () => {
 
             navigate('/');
         } catch (error) {
-            alert(error.message || 'Kaydedilemedi.');
+            toast.show.error(error.message || 'Kaydedilemedi.');
         } finally {
             setLoading(false);
         }
@@ -121,29 +123,27 @@ const AddExpense = () => {
                     </button>
                     <div>
                         <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Harcama Ekle</h1>
-                        <p className="text-slate-500 text-sm">Fis taratin veya manuel girin.</p>
+                        <p className="text-slate-500 text-sm">Fiş taratın veya manuel girin.</p>
                     </div>
                 </div>
 
                 <div className="flex p-1 bg-slate-100 dark:bg-slate-800 rounded-2xl mb-8">
                     <button
                         onClick={() => setActiveTab('manual')}
-                        className={`flex-1 py-3 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2 ${
-                            activeTab === 'manual'
-                                ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm'
-                                : 'text-slate-500'
-                        }`}
+                        className={`flex-1 py-3 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2 ${activeTab === 'manual'
+                            ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm'
+                            : 'text-slate-500'
+                            }`}
                     >
                         <span className="material-icons-round text-sm">edit</span>
                         Manuel
                     </button>
                     <button
                         onClick={() => setActiveTab('scan')}
-                        className={`flex-1 py-3 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2 ${
-                            activeTab === 'scan'
-                                ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-300 shadow-sm'
-                                : 'text-slate-500'
-                        }`}
+                        className={`flex-1 py-3 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2 ${activeTab === 'scan'
+                            ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-300 shadow-sm'
+                            : 'text-slate-500'
+                            }`}
                     >
                         <span className="material-icons-round text-sm">center_focus_strong</span>
                         Fis Tara (AI)
@@ -167,22 +167,22 @@ const AddExpense = () => {
                             <div className="py-12">
                                 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto mb-4"></div>
                                 <p className="text-slate-900 dark:text-white font-medium animate-pulse">
-                                    {uploadStep === 'uploading' && 'Fis yukleniyor...'}
-                                    {uploadStep === 'processing' && 'AI fisi okuyor...'}
+                                    {uploadStep === 'uploading' && 'Fiş yükleniyor...'}
+                                    {uploadStep === 'processing' && 'AI fişi okuyor...'}
                                 </p>
-                                <p className="text-xs text-slate-500 mt-2">Bu islem birkac saniye surebilir</p>
+                                <p className="text-xs text-slate-500 mt-2">Bu işlem birkaç saniye sürebilir</p>
                             </div>
                         ) : (
                             <div className="py-12">
                                 <div className="w-20 h-20 bg-indigo-50 dark:bg-indigo-900/20 rounded-full flex items-center justify-center mx-auto mb-6 text-indigo-500">
                                     <span className="material-icons-round text-4xl">add_a_photo</span>
                                 </div>
-                                <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-2">Fisi Buraya Yukleyin</h3>
+                                <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-2">Fişi Buraya Yükleyin</h3>
                                 <p className="text-slate-500 mb-6 max-w-xs mx-auto">
-                                    Yapay zeka fisi analiz edip form alanlarini otomatik doldurur.
+                                    Yapay zeka fişi analiz edip form alanlarını otomatik doldurur.
                                 </p>
                                 <button className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-xl font-bold transition-colors">
-                                    Dosya Sec
+                                    Dosya Seç
                                 </button>
                             </div>
                         )}
@@ -198,7 +198,7 @@ const AddExpense = () => {
                             <div className="bg-emerald-50 text-emerald-800 p-4 rounded-xl text-sm flex items-center gap-3 mb-6">
                                 <span className="material-icons-round">check_circle</span>
                                 <div>
-                                    <p className="font-bold">Fis Basariyla Okundu</p>
+                                    <p className="font-bold">Fiş Başarıyla Okundu</p>
                                     <p className="opacity-80 text-xs">Bilgileri kontrol edip kaydedin.</p>
                                 </div>
                             </div>
@@ -206,7 +206,7 @@ const AddExpense = () => {
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div className="space-y-2">
-                                <label className="text-sm font-semibold text-slate-700 dark:text-slate-300">Magaza / Isletme</label>
+                                <label className="text-sm font-semibold text-slate-700 dark:text-slate-300">Mağaza / İşletme</label>
                                 <input
                                     type="text"
                                     name="merchant"
@@ -243,7 +243,7 @@ const AddExpense = () => {
                                 />
                             </div>
                             <div className="space-y-2">
-                                <label className="text-sm font-semibold text-slate-700 dark:text-slate-300">Odeme Yontemi</label>
+                                <label className="text-sm font-semibold text-slate-700 dark:text-slate-300">Ödeme Yöntemi</label>
                                 <select
                                     name="paymentMethod"
                                     value={formData.paymentMethod}
@@ -267,11 +267,10 @@ const AddExpense = () => {
                                         key={cat.id}
                                         type="button"
                                         onClick={() => setFormData((prev) => ({ ...prev, category: cat.name }))}
-                                        className={`flex items-center gap-2 p-3 rounded-xl border text-left text-sm font-medium transition-all ${
-                                            formData.category === cat.name
-                                                ? 'bg-indigo-500 text-white border-indigo-500'
-                                                : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'
-                                        }`}
+                                        className={`flex items-center gap-2 p-3 rounded-xl border text-left text-sm font-medium transition-all ${formData.category === cat.name
+                                            ? 'bg-indigo-500 text-white border-indigo-500'
+                                            : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'
+                                            }`}
                                     >
                                         <span className="material-icons-round text-base">{cat.icon}</span>
                                         {cat.name}

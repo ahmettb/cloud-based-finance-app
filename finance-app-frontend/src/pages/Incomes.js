@@ -8,15 +8,18 @@ const Incomes = () => {
     const toast = useToast();
     const [incomes, setIncomes] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [adding, setAdding] = useState(false);
+    const [saving, setSaving] = useState(false);
     const [deleteId, setDeleteId] = useState(null);
+    const [editingIncome, setEditingIncome] = useState(null); // null = add mode, object = edit mode
 
-    const [formData, setFormData] = useState({
+    const defaultForm = {
         source: '',
         amount: '',
         income_date: new Date().toISOString().split('T')[0],
         description: ''
-    });
+    };
+
+    const [formData, setFormData] = useState(defaultForm);
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
     useEffect(() => {
@@ -36,7 +39,22 @@ const Incomes = () => {
         }
     };
 
-    const handleAdd = async (e) => {
+    const resetForm = () => {
+        setEditingIncome(null);
+        setFormData(defaultForm);
+    };
+
+    const openEditForm = (income) => {
+        setEditingIncome(income);
+        setFormData({
+            source: income.source || '',
+            amount: String(income.amount || ''),
+            income_date: income.income_date ? income.income_date.split('T')[0] : new Date().toISOString().split('T')[0],
+            description: income.description || ''
+        });
+    };
+
+    const handleSubmit = async (e) => {
         e.preventDefault();
         if (!formData.source || !formData.amount) {
             toast.show.warning('Lütfen kaynak ve tutar giriniz');
@@ -44,21 +62,26 @@ const Incomes = () => {
         }
 
         try {
-            setAdding(true);
-            await api.addIncome(formData);
-            toast.show.success('Gelir başarıyla eklendi');
-            setFormData({
-                source: '',
-                amount: '',
-                income_date: new Date().toISOString().split('T')[0],
-                description: ''
-            });
+            setSaving(true);
+            if (editingIncome) {
+                await api.updateIncome(editingIncome.id, {
+                    source: formData.source,
+                    amount: parseFloat(formData.amount),
+                    income_date: formData.income_date,
+                    description: formData.description
+                });
+                toast.show.success('Gelir güncellendi');
+            } else {
+                await api.addIncome(formData);
+                toast.show.success('Gelir başarıyla eklendi');
+            }
+            resetForm();
             fetchIncomes();
         } catch (error) {
             console.error(error);
-            toast.show.error('Ekleme başarısız');
+            toast.show.error(editingIncome ? 'Güncelleme başarısız' : 'Ekleme başarısız');
         } finally {
-            setAdding(false);
+            setSaving(false);
         }
     };
 
@@ -68,6 +91,7 @@ const Incomes = () => {
             await api.deleteIncome(deleteId);
             setIncomes(incomes.filter(i => i.id !== deleteId));
             toast.show.success('Gelir silindi');
+            if (editingIncome?.id === deleteId) resetForm();
         } catch (error) {
             toast.show.error('Silme başarısız');
         } finally {
@@ -109,13 +133,13 @@ const Incomes = () => {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                {/* Left: Add Form */}
+                {/* Left: Add / Edit Form */}
                 <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 h-fit">
                     <h2 className="text-lg font-bold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
-                        <span className="material-icons-round text-emerald-600">add_circle</span>
-                        Yeni Gelir Ekle
+                        <span className="material-icons-round text-emerald-600">{editingIncome ? 'edit' : 'add_circle'}</span>
+                        {editingIncome ? 'Gelir Düzenle' : 'Yeni Gelir Ekle'}
                     </h2>
-                    <form onSubmit={handleAdd} className="space-y-4">
+                    <form onSubmit={handleSubmit} className="space-y-4">
                         <div>
                             <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Gelir Kaynağı</label>
                             <input
@@ -131,6 +155,7 @@ const Incomes = () => {
                             <input
                                 type="number"
                                 placeholder="0.00"
+                                step="0.01"
                                 value={formData.amount}
                                 onChange={e => setFormData({ ...formData, amount: e.target.value })}
                                 className="w-full px-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 outline-none focus:ring-2 focus:ring-emerald-500/20 text-sm font-bold"
@@ -155,14 +180,25 @@ const Incomes = () => {
                                 className="w-full px-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 outline-none focus:ring-2 focus:ring-emerald-500/20 text-sm font-medium resize-none"
                             />
                         </div>
-                        <button
-                            type="submit"
-                            disabled={adding}
-                            className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-3 rounded-xl shadow-lg shadow-slate-200 dark:shadow-none transition-all flex justify-center items-center gap-2 disabled:opacity-70"
-                        >
-                            {adding ? <span className="material-icons-round animate-spin text-sm">refresh</span> : <span className="material-icons-round text-sm">save</span>}
-                            {adding ? 'Ekleniyor...' : 'Kaydet'}
-                        </button>
+                        <div className="flex gap-3">
+                            {editingIncome && (
+                                <button
+                                    type="button"
+                                    onClick={resetForm}
+                                    className="flex-1 py-3 rounded-xl font-bold text-slate-600 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors border border-slate-200 dark:border-slate-700"
+                                >
+                                    İptal
+                                </button>
+                            )}
+                            <button
+                                type="submit"
+                                disabled={saving}
+                                className={`${editingIncome ? 'flex-1' : 'w-full'} bg-slate-900 hover:bg-slate-800 text-white font-bold py-3 rounded-xl shadow-lg shadow-slate-200 dark:shadow-none transition-all flex justify-center items-center gap-2 disabled:opacity-70`}
+                            >
+                                {saving ? <span className="material-icons-round animate-spin text-sm">refresh</span> : <span className="material-icons-round text-sm">{editingIncome ? 'check' : 'save'}</span>}
+                                {saving ? (editingIncome ? 'Güncelleniyor...' : 'Ekleniyor...') : (editingIncome ? 'Güncelle' : 'Kaydet')}
+                            </button>
+                        </div>
                     </form>
                 </div>
 
@@ -195,7 +231,7 @@ const Incomes = () => {
                                 </thead>
                                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                                     {incomes.map(inc => (
-                                        <tr key={inc.id} className="group hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                                        <tr key={inc.id} className={`group hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors ${editingIncome?.id === inc.id ? 'bg-emerald-50/50 dark:bg-emerald-900/10' : ''}`}>
                                             <td className="p-4">
                                                 <div className="font-bold text-slate-900 dark:text-white text-sm">{inc.source}</div>
                                                 <div className="text-xs text-slate-400">{inc.description || '-'}</div>
@@ -209,12 +245,22 @@ const Incomes = () => {
                                                 </span>
                                             </td>
                                             <td className="p-4 text-right">
-                                                <button
-                                                    onClick={() => setDeleteId(inc.id)}
-                                                    className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all opacity-0 group-hover:opacity-100"
-                                                >
-                                                    <span className="material-icons-round text-lg">delete</span>
-                                                </button>
+                                                <div className="flex items-center gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+                                                    <button
+                                                        onClick={() => openEditForm(inc)}
+                                                        className="p-2 text-slate-300 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-all"
+                                                        title="Düzenle"
+                                                    >
+                                                        <span className="material-icons-round text-lg">edit</span>
+                                                    </button>
+                                                    <button
+                                                        onClick={() => setDeleteId(inc.id)}
+                                                        className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-all"
+                                                        title="Sil"
+                                                    >
+                                                        <span className="material-icons-round text-lg">delete</span>
+                                                    </button>
+                                                </div>
                                             </td>
                                         </tr>
                                     ))}
@@ -229,6 +275,3 @@ const Incomes = () => {
 };
 
 export default Incomes;
-
-
-

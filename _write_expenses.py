@@ -1,4 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import os
+
+content = """import React, { useEffect, useMemo, useState } from 'react';
 import { api } from '../services/api';
 import DashboardLayout from '../components/layout/DashboardLayout';
 import { useToast } from '../context/ToastContext';
@@ -11,7 +13,7 @@ const fmtCurrency = (v) =>
 
 const fmtMonth = (iso) => {
     const [y, m] = iso.split('-');
-    const months = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
+    const months = ['Ocak', '\u015eubat', 'Mart', 'Nisan', 'May\u0131s', 'Haziran', 'Temmuz', 'A\u011fustos', 'Eyl\u00fcl', 'Ekim', 'Kas\u0131m', 'Aral\u0131k'];
     return `${months[parseInt(m, 10) - 1]} ${y}`;
 };
 
@@ -22,9 +24,9 @@ const shiftMonth = (iso, dir) => {
 };
 
 const STATUS_BADGE = {
-    paid: { label: 'Ödendi', color: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400', icon: 'check_circle' },
+    paid: { label: '\u00d6dendi', color: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400', icon: 'check_circle' },
     pending: { label: 'Bekliyor', color: 'bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400', icon: 'schedule' },
-    overdue: { label: 'Gecikmiş', color: 'bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-400', icon: 'error' },
+    overdue: { label: 'Gecikmi\u015f', color: 'bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-400', icon: 'error' },
 };
 
 const CATEGORY_ICONS = {
@@ -32,8 +34,8 @@ const CATEGORY_ICONS = {
     Fatura: 'receipt_long',
     Abonelik: 'subscriptions',
     Kredi: 'credit_card',
-    'Eğitim': 'school',
-    'Diğer': 'more_horiz',
+    'E\u011fitim': 'school',
+    'Di\u011fer': 'more_horiz',
 };
 
 /* component */
@@ -52,13 +54,10 @@ const Expenses = () => {
     const [editGroup, setEditGroup] = useState(null);
     const [editItem, setEditItem] = useState(null);
     const [deleteTarget, setDeleteTarget] = useState(null);
-    const [showPaymentForm, setShowPaymentForm] = useState(null); // item object
-    const [expandedHistory, setExpandedHistory] = useState({}); // { itemId: true }
 
     /* forms */
     const [groupForm, setGroupForm] = useState({ title: '', category_type: FIXED_GROUP_CATEGORIES[0] });
     const [itemForm, setItemForm] = useState({ name: '', amount: '', day: '1' });
-    const [paymentForm, setPaymentForm] = useState({ payment_date: new Date().toISOString().split('T')[0], amount: '', note: '' });
 
     /* fetch */
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -71,7 +70,7 @@ const Expenses = () => {
             setGroups(res.data || []);
             setStats(res.stats || { total: 0, paid: 0, remaining: 0, count: 0, pending_count: 0 });
         } catch (err) {
-            toast.show.error('Sabit giderler yüklenemedi');
+            toast.show.error('Sabit giderler y\u00fcklenemedi');
         } finally {
             setLoading(false);
         }
@@ -81,20 +80,20 @@ const Expenses = () => {
     const handleGroupSubmit = async (e) => {
         e.preventDefault();
         const title = groupForm.title.trim();
-        if (!title) { toast.show.warning('Grup adı gerekli'); return; }
+        if (!title) { toast.show.warning('Grup ad\u0131 gerekli'); return; }
 
         try {
             if (editGroup) {
                 await api.updateFixedExpenseGroup(editGroup.id, groupForm);
-                toast.show.success('Grup güncellendi');
+                toast.show.success('Grup g\u00fcncellendi');
             } else {
                 await api.createFixedExpenseGroup(groupForm);
-                toast.show.success('Yeni grup oluşturuldu');
+                toast.show.success('Yeni grup olu\u015fturuldu');
             }
             resetGroupForm();
             fetchData();
         } catch {
-            toast.show.error(editGroup ? 'Güncelleme başarısız' : 'Oluşturma başarısız');
+            toast.show.error(editGroup ? 'G\u00fcncelleme ba\u015far\u0131s\u0131z' : 'Olu\u015fturma ba\u015far\u0131s\u0131z');
         }
     };
 
@@ -117,13 +116,13 @@ const Expenses = () => {
         const amount = parseFloat(itemForm.amount);
         const day = parseInt(itemForm.day, 10);
 
-        if (!name || isNaN(amount) || amount <= 0) { toast.show.warning('Ad ve geçerli bir tutar giriniz'); return; }
-        if (isNaN(day) || day < 1 || day > 31) { toast.show.warning('Gün 1-31 arasında olmalı'); return; }
+        if (!name || isNaN(amount) || amount <= 0) { toast.show.warning('Ad ve ge\u00e7erli bir tutar giriniz'); return; }
+        if (isNaN(day) || day < 1 || day > 31) { toast.show.warning('G\u00fcn 1-31 aras\u0131nda olmal\u0131'); return; }
 
         try {
             if (editItem) {
                 await api.updateFixedExpenseItem(editItem.id, { name, amount, day });
-                toast.show.success('Kalem güncellendi');
+                toast.show.success('Kalem g\u00fcncellendi');
             } else {
                 await api.addFixedExpenseItem({ group_id: showItemForm, name, amount, day });
                 toast.show.success('Kalem eklendi');
@@ -131,7 +130,7 @@ const Expenses = () => {
             resetItemForm();
             fetchData();
         } catch {
-            toast.show.error('İşlem başarısız');
+            toast.show.error('\u0130\u015flem ba\u015far\u0131s\u0131z');
         }
     };
 
@@ -153,41 +152,10 @@ const Expenses = () => {
         try {
             await api.saveFixedExpensePayment(item.id, { status: newStatus, month });
             fetchData();
-            toast.show.success(newStatus === 'paid' ? 'Ödendi olarak işaretlendi' : 'Bekliyora çevrildi');
+            toast.show.success(newStatus === 'paid' ? '\u00d6dendi olarak i\u015faretlendi' : 'Bekliyora \u00e7evrildi');
         } catch {
-            toast.show.error('Durum güncellenemedi');
+            toast.show.error('Durum g\u00fcncellenemedi');
         }
-    };
-
-    /* payment record */
-    const openPaymentForm = (item) => {
-        setShowPaymentForm(item);
-        setPaymentForm({ payment_date: new Date().toISOString().split('T')[0], amount: String(item.amount || ''), note: '' });
-    };
-
-    const handlePaymentSubmit = async (e) => {
-        e.preventDefault();
-        if (!showPaymentForm) return;
-        const amount = parseFloat(paymentForm.amount);
-        if (isNaN(amount) || amount <= 0) { toast.show.warning('Geçerli bir tutar giriniz'); return; }
-
-        try {
-            await api.saveFixedExpensePayment(showPaymentForm.id, {
-                status: 'paid',
-                payment_date: paymentForm.payment_date,
-                amount,
-                note: paymentForm.note.trim()
-            });
-            toast.show.success('Ödeme kaydedildi');
-            setShowPaymentForm(null);
-            fetchData();
-        } catch {
-            toast.show.error('Ödeme kaydedilemedi');
-        }
-    };
-
-    const toggleHistory = (itemId) => {
-        setExpandedHistory(prev => ({ ...prev, [itemId]: !prev[itemId] }));
     };
 
     /* delete */
@@ -202,7 +170,7 @@ const Expenses = () => {
             toast.show.success(`${deleteTarget.label} silindi`);
             fetchData();
         } catch {
-            toast.show.error('Silme başarısız');
+            toast.show.error('Silme ba\u015far\u0131s\u0131z');
         } finally {
             setDeleteTarget(null);
         }
@@ -228,7 +196,7 @@ const Expenses = () => {
             <ConfirmDialog
                 isOpen={!!deleteTarget}
                 title={deleteTarget?.type === 'group' ? 'Grubu Sil' : 'Kalemi Sil'}
-                message={`"${deleteTarget?.label || ''}" silinecek. Bu işlem geri alınamaz.`}
+                message={`"${deleteTarget?.label || ''}" silinecek. Bu i\u015flem geri al\u0131namaz.`}
                 confirmText="Evet, Sil"
                 onConfirm={handleDeleteConfirm}
                 onCancel={() => setDeleteTarget(null)}
@@ -238,7 +206,7 @@ const Expenses = () => {
             {/* Header */}
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
                 <div>
-                    <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Gider Yönetimi</h1>
+                    <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Gider Y\u00f6netimi</h1>
                     <p className="text-slate-500 text-sm mt-1">Sabit giderlerinizi gruplar halinde takip edin.</p>
                 </div>
                 <button
@@ -271,7 +239,7 @@ const Expenses = () => {
                     <p className="text-xl font-bold text-slate-900 dark:text-white">{fmtCurrency(stats.total)}</p>
                 </div>
                 <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm">
-                    <p className="text-[10px] font-bold text-emerald-600 uppercase mb-1">Ödenen</p>
+                    <p className="text-[10px] font-bold text-emerald-600 uppercase mb-1">\u00d6denen</p>
                     <p className="text-xl font-bold text-emerald-600">{fmtCurrency(stats.paid)}</p>
                 </div>
                 <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm">
@@ -295,15 +263,15 @@ const Expenses = () => {
                     <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 max-w-md w-full shadow-2xl border border-slate-100 dark:border-slate-800 animate-scale-in" onClick={e => e.stopPropagation()}>
                         <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
                             <span className="material-icons-round text-indigo-600">{editGroup ? 'edit' : 'create_new_folder'}</span>
-                            {editGroup ? 'Grubu Düzenle' : 'Yeni Gider Grubu'}
+                            {editGroup ? 'Grubu D\u00fczenle' : 'Yeni Gider Grubu'}
                         </h3>
                         <form onSubmit={handleGroupSubmit} className="space-y-4">
                             <div>
-                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Grup Adı</label>
+                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Grup Ad\u0131</label>
                                 <input
                                     autoFocus
                                     type="text"
-                                    placeholder="Örn: Ev Giderleri"
+                                    placeholder="\u00d6rn: Ev Giderleri"
                                     value={groupForm.title}
                                     onChange={e => setGroupForm({ ...groupForm, title: e.target.value })}
                                     className="w-full px-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 outline-none focus:ring-2 focus:ring-indigo-500/20 text-sm font-medium"
@@ -321,10 +289,10 @@ const Expenses = () => {
                             </div>
                             <div className="flex gap-3 pt-2">
                                 <button type="button" onClick={resetGroupForm} className="flex-1 py-2.5 rounded-xl font-bold text-slate-600 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
-                                    İptal
+                                    \u0130ptal
                                 </button>
                                 <button type="submit" className="flex-1 py-2.5 rounded-xl font-bold bg-slate-900 dark:bg-indigo-600 text-white hover:bg-slate-800 dark:hover:bg-indigo-700 transition-colors shadow-lg">
-                                    {editGroup ? 'Güncelle' : 'Oluştur'}
+                                    {editGroup ? 'G\u00fcncelle' : 'Olu\u015ftur'}
                                 </button>
                             </div>
                         </form>
@@ -338,15 +306,15 @@ const Expenses = () => {
                     <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 max-w-md w-full shadow-2xl border border-slate-100 dark:border-slate-800 animate-scale-in" onClick={e => e.stopPropagation()}>
                         <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
                             <span className="material-icons-round text-indigo-600">{editItem ? 'edit' : 'add_circle'}</span>
-                            {editItem ? 'Kalemi Düzenle' : 'Yeni Gider Kalemi'}
+                            {editItem ? 'Kalemi D\u00fczenle' : 'Yeni Gider Kalemi'}
                         </h3>
                         <form onSubmit={handleItemSubmit} className="space-y-4">
                             <div>
-                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Kalem Adı</label>
+                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Kalem Ad\u0131</label>
                                 <input
                                     autoFocus
                                     type="text"
-                                    placeholder="Örn: Elektrik Faturası"
+                                    placeholder="\u00d6rn: Elektrik Faturas\u0131"
                                     value={itemForm.name}
                                     onChange={e => setItemForm({ ...itemForm, name: e.target.value })}
                                     className="w-full px-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 outline-none focus:ring-2 focus:ring-indigo-500/20 text-sm font-medium"
@@ -366,7 +334,7 @@ const Expenses = () => {
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Ödeme Günü</label>
+                                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">\u00d6deme G\u00fcn\u00fc</label>
                                     <input
                                         type="number"
                                         min="1"
@@ -379,73 +347,10 @@ const Expenses = () => {
                             </div>
                             <div className="flex gap-3 pt-2">
                                 <button type="button" onClick={resetItemForm} className="flex-1 py-2.5 rounded-xl font-bold text-slate-600 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
-                                    İptal
+                                    \u0130ptal
                                 </button>
                                 <button type="submit" className="flex-1 py-2.5 rounded-xl font-bold bg-slate-900 dark:bg-indigo-600 text-white hover:bg-slate-800 dark:hover:bg-indigo-700 transition-colors shadow-lg">
-                                    {editItem ? 'Güncelle' : 'Ekle'}
-                                </button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-            )}
-
-            {/* Payment Record Form Dialog */}
-            {showPaymentForm && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm animate-fade-in" onClick={() => setShowPaymentForm(null)}>
-                    <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 max-w-md w-full shadow-2xl border border-slate-100 dark:border-slate-800 animate-scale-in" onClick={e => e.stopPropagation()}>
-                        <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-1 flex items-center gap-2">
-                            <span className="material-icons-round text-emerald-600">payments</span>
-                            Ödeme Kaydı Ekle
-                        </h3>
-                        <p className="text-sm text-slate-500 mb-4">
-                            <span className="font-bold text-slate-700 dark:text-slate-300">{showPaymentForm.name}</span> için ödeme bilgisi girin.
-                        </p>
-                        <form onSubmit={handlePaymentSubmit} className="space-y-4">
-                            <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Ödeme Tarihi</label>
-                                    <input
-                                        autoFocus
-                                        type="date"
-                                        value={paymentForm.payment_date}
-                                        onChange={e => setPaymentForm({ ...paymentForm, payment_date: e.target.value })}
-                                        className="w-full px-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 outline-none focus:ring-2 focus:ring-emerald-500/20 text-sm font-medium"
-                                        required
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Tutar (TL)</label>
-                                    <input
-                                        type="number"
-                                        step="0.01"
-                                        min="0"
-                                        placeholder="0.00"
-                                        value={paymentForm.amount}
-                                        onChange={e => setPaymentForm({ ...paymentForm, amount: e.target.value })}
-                                        className="w-full px-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 outline-none focus:ring-2 focus:ring-emerald-500/20 text-sm font-bold"
-                                        required
-                                    />
-                                </div>
-                            </div>
-                            <div>
-                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Not (Opsiyonel)</label>
-                                <input
-                                    type="text"
-                                    placeholder="Örn: Banka havalesi ile ödendi"
-                                    value={paymentForm.note}
-                                    onChange={e => setPaymentForm({ ...paymentForm, note: e.target.value })}
-                                    className="w-full px-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 outline-none focus:ring-2 focus:ring-emerald-500/20 text-sm font-medium"
-                                    maxLength={280}
-                                />
-                            </div>
-                            <div className="flex gap-3 pt-2">
-                                <button type="button" onClick={() => setShowPaymentForm(null)} className="flex-1 py-2.5 rounded-xl font-bold text-slate-600 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
-                                    İptal
-                                </button>
-                                <button type="submit" className="flex-1 py-2.5 rounded-xl font-bold bg-emerald-600 text-white hover:bg-emerald-700 transition-colors shadow-lg shadow-emerald-200 dark:shadow-none flex items-center justify-center gap-2">
-                                    <span className="material-icons-round text-sm">check</span>
-                                    Ödemeyi Kaydet
+                                    {editItem ? 'G\u00fcncelle' : 'Ekle'}
                                 </button>
                             </div>
                         </form>
@@ -457,14 +362,14 @@ const Expenses = () => {
             {groups.length === 0 ? (
                 <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-12 flex flex-col items-center text-center">
                     <span className="material-icons-round text-5xl text-slate-200 dark:text-slate-700 mb-4">account_balance</span>
-                    <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-2">Henüz sabit gider grubu yok</h3>
-                    <p className="text-sm text-slate-500 mb-6 max-w-sm">Kira, fatura ve abonelik gibi düzenli giderlerinizi gruplar halinde takip etmeye başlayın.</p>
+                    <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-2">Hen\u00fcz sabit gider grubu yok</h3>
+                    <p className="text-sm text-slate-500 mb-6 max-w-sm">Kira, fatura ve abonelik gibi d\u00fczenli giderlerinizi gruplar halinde takip etmeye ba\u015flay\u0131n.</p>
                     <button
                         onClick={() => { resetGroupForm(); setShowGroupForm(true); }}
                         className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-xl font-bold text-sm transition-all flex items-center gap-2 shadow-lg shadow-indigo-200 dark:shadow-none"
                     >
                         <span className="material-icons-round text-lg">add</span>
-                        İlk Grubu Oluştur
+                        \u0130lk Grubu Olu\u015ftur
                     </button>
                 </div>
             ) : (
@@ -487,7 +392,7 @@ const Expenses = () => {
                                             <div className="flex items-center gap-2">
                                                 <span className="text-xs text-slate-400 font-medium">{group.category_type}</span>
                                                 <span className="text-xs text-slate-300 dark:text-slate-600">|</span>
-                                                <span className="text-xs text-slate-400">{groupPaid}/{groupTotal} ödendi</span>
+                                                <span className="text-xs text-slate-400">{groupPaid}/{groupTotal} \u00f6dendi</span>
                                                 {group.total_amount > 0 && (
                                                     <>
                                                         <span className="text-xs text-slate-300 dark:text-slate-600">|</span>
@@ -508,7 +413,7 @@ const Expenses = () => {
                                         <button
                                             onClick={() => openEditGroup(group)}
                                             className="p-2 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all"
-                                            title="Düzenle"
+                                            title="D\u00fczenle"
                                         >
                                             <span className="material-icons-round text-lg">edit</span>
                                         </button>
@@ -526,7 +431,7 @@ const Expenses = () => {
                                 {(!group.items || group.items.length === 0) ? (
                                     <div className="p-8 text-center text-slate-400">
                                         <span className="material-icons-round text-3xl opacity-20 mb-2 block">inbox</span>
-                                        <p className="text-sm">Bu grupta henüz kalem yok.</p>
+                                        <p className="text-sm">Bu grupta hen\u00fcz kalem yok.</p>
                                         <button
                                             onClick={() => { resetItemForm(); setShowItemForm(group.id); }}
                                             className="mt-3 text-indigo-600 hover:text-indigo-700 text-sm font-bold inline-flex items-center gap-1"
@@ -545,11 +450,12 @@ const Expenses = () => {
                                                         {/* Payment Toggle */}
                                                         <button
                                                             onClick={() => handlePaymentToggle(item)}
-                                                            className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 transition-all ${item.status === 'paid'
-                                                                ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400'
-                                                                : 'bg-slate-100 dark:bg-slate-800 text-slate-300 dark:text-slate-600 hover:bg-emerald-50 hover:text-emerald-500'
-                                                                }`}
-                                                            title={item.status === 'paid' ? 'Bekliyora çevir' : 'Ödendi olarak işaretle'}
+                                                            className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 transition-all ${
+                                                                item.status === 'paid'
+                                                                    ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400'
+                                                                    : 'bg-slate-100 dark:bg-slate-800 text-slate-300 dark:text-slate-600 hover:bg-emerald-50 hover:text-emerald-500'
+                                                            }`}
+                                                            title={item.status === 'paid' ? 'Bekliyora \u00e7evir' : '\u00d6dendi olarak i\u015faretle'}
                                                         >
                                                             <span className="material-icons-round text-lg">
                                                                 {item.status === 'paid' ? 'check' : 'radio_button_unchecked'}
@@ -567,8 +473,8 @@ const Expenses = () => {
                                                                 </span>
                                                             </div>
                                                             <p className="text-xs text-slate-400 mt-0.5">
-                                                                Her ayın {item.day}. günü
-                                                                {item.month_payment?.payment_date && ` — Son ödeme: ${new Date(item.month_payment.payment_date).toLocaleDateString('tr-TR')}`}
+                                                                Her ay\u0131n {item.day}. g\u00fcn\u00fc
+                                                                {item.month_payment?.payment_date && ` \\u2014 Son \u00f6deme: ${new Date(item.month_payment.payment_date).toLocaleDateString('tr-TR')}`}
                                                             </p>
                                                         </div>
 
@@ -580,16 +486,9 @@ const Expenses = () => {
                                                         {/* Actions */}
                                                         <div className="flex items-center gap-0.5 opacity-0 group-hover/item:opacity-100 transition-opacity flex-shrink-0">
                                                             <button
-                                                                onClick={() => openPaymentForm(item)}
-                                                                className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 transition-all"
-                                                                title="Ödeme Kaydı Ekle"
-                                                            >
-                                                                <span className="material-icons-round text-base">add_card</span>
-                                                            </button>
-                                                            <button
                                                                 onClick={() => openEditItem(item, group.id)}
                                                                 className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all"
-                                                                title="Düzenle"
+                                                                title="D\u00fczenle"
                                                             >
                                                                 <span className="material-icons-round text-base">edit</span>
                                                             </button>
@@ -603,78 +502,24 @@ const Expenses = () => {
                                                         </div>
                                                     </div>
 
-                                                    {/* Payment History */}
+                                                    {/* Payment History (compact) */}
                                                     {item.history && item.history.length > 0 && (
                                                         <div className="ml-12 mt-2">
-                                                            <button
-                                                                onClick={() => toggleHistory(item.id)}
-                                                                className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-indigo-600 transition-colors mb-1.5"
-                                                            >
-                                                                <span className="material-icons-round text-sm" style={{ transition: 'transform 0.2s', transform: expandedHistory[item.id] ? 'rotate(90deg)' : 'rotate(0deg)' }}>chevron_right</span>
-                                                                <span className="font-bold">Ödeme Geçmişi ({item.history.length})</span>
-                                                            </button>
-
-                                                            {/* Collapsed: mini badge view */}
-                                                            {!expandedHistory[item.id] && (
-                                                                <div className="flex items-center gap-1 flex-wrap">
-                                                                    {item.history.slice(0, 6).map((h, idx) => (
-                                                                        <span
-                                                                            key={idx}
-                                                                            className={`text-[9px] font-medium px-1.5 py-0.5 rounded ${h.status === 'paid'
+                                                            <div className="flex items-center gap-1 flex-wrap">
+                                                                {item.history.slice(0, 5).map((h, idx) => (
+                                                                    <span
+                                                                        key={idx}
+                                                                        className={`text-[9px] font-medium px-1.5 py-0.5 rounded ${
+                                                                            h.status === 'paid'
                                                                                 ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400'
                                                                                 : 'bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-500'
-                                                                                }`}
-                                                                            title={`${new Date(h.date).toLocaleDateString('tr-TR')} — ${fmtCurrency(h.amount)}${h.note ? ' — ' + h.note : ''}`}
-                                                                        >
-                                                                            {new Date(h.date).toLocaleDateString('tr-TR', { month: 'short', year: '2-digit' })}
-                                                                        </span>
-                                                                    ))}
-                                                                    {item.history.length > 6 && (
-                                                                        <span className="text-[9px] text-slate-400 font-medium">+{item.history.length - 6}</span>
-                                                                    )}
-                                                                </div>
-                                                            )}
-
-                                                            {/* Expanded: full timeline */}
-                                                            {expandedHistory[item.id] && (
-                                                                <div className="relative pl-4 border-l-2 border-slate-100 dark:border-slate-800 space-y-2 mt-1">
-                                                                    {item.history.map((h, idx) => (
-                                                                        <div key={idx} className="relative">
-                                                                            <div className={`absolute -left-[21px] top-1 w-3 h-3 rounded-full border-2 border-white dark:border-slate-900 ${h.status === 'paid' ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`}></div>
-                                                                            <div className="flex items-center gap-2 flex-wrap">
-                                                                                <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                                                                                    {new Date(h.date).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' })}
-                                                                                </span>
-                                                                                <span className={`text-xs font-bold ${h.status === 'paid' ? 'text-emerald-600' : 'text-amber-500'}`}>
-                                                                                    {fmtCurrency(h.amount)}
-                                                                                </span>
-                                                                                <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${h.status === 'paid'
-                                                                                        ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400'
-                                                                                        : 'bg-amber-50 text-amber-600 dark:bg-amber-900/20 dark:text-amber-400'
-                                                                                    }`}>
-                                                                                    {h.status === 'paid' ? 'Ödendi' : 'Bekliyor'}
-                                                                                </span>
-                                                                            </div>
-                                                                            {h.note && (
-                                                                                <p className="text-[10px] text-slate-400 mt-0.5 italic">💬 {h.note}</p>
-                                                                            )}
-                                                                        </div>
-                                                                    ))}
-                                                                </div>
-                                                            )}
-                                                        </div>
-                                                    )}
-
-                                                    {/* No history yet - subtle link */}
-                                                    {(!item.history || item.history.length === 0) && (
-                                                        <div className="ml-12 mt-1">
-                                                            <button
-                                                                onClick={() => openPaymentForm(item)}
-                                                                className="text-[10px] text-slate-300 hover:text-emerald-500 transition-colors flex items-center gap-1"
-                                                            >
-                                                                <span className="material-icons-round text-xs">add_circle_outline</span>
-                                                                İlk ödeme kaydını ekle
-                                                            </button>
+                                                                        }`}
+                                                                        title={`${new Date(h.date).toLocaleDateString('tr-TR')} \\u2014 ${fmtCurrency(h.amount)}`}
+                                                                    >
+                                                                        {new Date(h.date).toLocaleDateString('tr-TR', { month: 'short' })}
+                                                                    </span>
+                                                                ))}
+                                                            </div>
                                                         </div>
                                                     )}
                                                 </div>
@@ -692,3 +537,9 @@ const Expenses = () => {
 };
 
 export default Expenses;
+"""
+
+target = r"c:\Users\ahmet\OneDrive\Desktop\cloud-based-finance-app\finance-app-frontend\src\pages\Expenses.js"
+with open(target, 'w', encoding='utf-8') as f:
+    f.write(content)
+print("OK - wrote", len(content), "chars")

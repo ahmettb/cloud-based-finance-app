@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import DashboardLayout from '../components/layout/DashboardLayout';
 import { api } from '../services/api';
 import { useToast } from '../context/ToastContext';
+import ConfirmDialog from '../components/ui/ConfirmDialog';
 
 const currencyFormatter = new Intl.NumberFormat('tr-TR', {
     style: 'currency',
@@ -14,6 +15,7 @@ const defaultMonth = new Date().toISOString().slice(0, 7);
 const Insights = () => {
     const toast = useToast();
     const [month, setMonth] = useState(defaultMonth);
+    const [persona, setPersona] = useState('friendly');
     const [loading, setLoading] = useState(true);
     const [overview, setOverview] = useState(null);
     const [analysis, setAnalysis] = useState(null);
@@ -28,9 +30,20 @@ const Insights = () => {
     const [whatIfCategory, setWhatIfCategory] = useState('');
     const [whatIfCutPercent, setWhatIfCutPercent] = useState(10);
 
-    // Goal inline edit state (replaces window.prompt)
+    // Multi-scenario state
+    const [scenarios, setScenarios] = useState([]);
+
+    // Goal inline edit
     const [editingGoalId, setEditingGoalId] = useState(null);
     const [editingGoalValue, setEditingGoalValue] = useState('');
+
+    // AI action apply modal
+    const [applyingAction, setApplyingAction] = useState(null);
+    const [applyForm, setApplyForm] = useState({});
+    const [applyLoading, setApplyLoading] = useState(false);
+
+    // Impact tracking
+    const [impactData, setImpactData] = useState(null);
 
     const [goalForm, setGoalForm] = useState({
         title: '',
@@ -72,12 +85,43 @@ const Insights = () => {
         }
     };
 
+    const loadImpactData = async () => {
+        // Compare last month's recommendations with this month's results
+        try {
+            const now = new Date();
+            const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+            const lastMonthStr = lastMonth.toISOString().slice(0, 7);
+
+            const [lastActions, currentOverview] = await Promise.all([
+                api.getAIActions(lastMonthStr),
+                api.getInsightsOverview(month)
+            ]);
+
+            const completedActions = (lastActions?.data || []).filter(a => a.status === 'done');
+            const totalActions = lastActions?.data?.length || 0;
+
+            if (totalActions > 0) {
+                setImpactData({
+                    lastMonth: lastMonthStr,
+                    totalActions,
+                    completedActions: completedActions.length,
+                    completionRate: Math.round((completedActions.length / totalActions) * 100),
+                    currentSavingsRate: currentOverview?.financial_health?.savings_rate || 0,
+                    lastMonthSavingsRate: currentOverview?.financial_health?.prev_savings_rate || null,
+                    topCompleted: completedActions.slice(0, 3)
+                });
+            }
+        } catch (error) {
+            console.error('Impact data load error:', error);
+        }
+    };
+
     const loadAll = async () => {
         try {
             setLoading(true);
             const [overviewRes, analysisRes, goalsRes] = await Promise.all([
                 api.getInsightsOverview(month),
-                api.analyzeSpending({ period: month, useCache: true }),
+                api.analyzeSpending({ period: month, useCache: true, persona }),
                 api.getGoals()
             ]);
 
@@ -92,13 +136,33 @@ const Insights = () => {
 
             await Promise.all([
                 loadActions(month),
-                loadWhatIf(month, '', whatIfCutPercent)
+                loadWhatIf(month, '', whatIfCutPercent),
+                loadImpactData()
             ]);
         } catch (error) {
             console.error(error);
             toast.show.error('İçgörü verileri yüklenemedi');
             setOverview(null);
             setAnalysis(null);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handlePersonaChange = async (newPersona) => {
+        setPersona(newPersona);
+        try {
+            setLoading(true);
+            const analysisRes = await api.analyzeSpending({ period: month, useCache: true, persona: newPersona });
+            setAnalysis(analysisRes);
+            const nextActions = analysisRes?.next_actions || [];
+            if (nextActions.length > 0) {
+                await api.syncAIActions(month, nextActions);
+                await loadActions(month);
+            }
+        } catch (error) {
+            console.error(error);
+            toast.show.error('Persona güncellenemedi');
         } finally {
             setLoading(false);
         }
@@ -193,6 +257,55 @@ const Insights = () => {
         await loadWhatIf(month, whatIfCategory, whatIfCutPercent);
     };
 
+    // Multi-scenario: save current scenario to the list
+    const handleSaveScenario = () => {
+        if (!whatIfData?.scenario) return;
+        const newScenario = {
+            id: Date.now(),
+            ...whatIfData.scenario,
+            label: `${whatIfData.scenario.category} -%${whatIfData.scenario.cut_percent}`
+        };
+        setScenarios(prev => [...prev, newScenario]);
+        toast.show.success('Senaryo kaydedildi');
+    };
+
+    // AI Action Apply
+    const openApplyModal = (action) => {
+        const title = (action.title || '').toLowerCase();
+        let actionType = 'set_budget';
+        let defaults = {};
+
+        if (title.includes('bütçe') || title.includes('butce') || title.includes('limit') || title.includes('azalt')) {
+            actionType = 'set_budget';
+            defaults = { category_name: '', amount: '' };
+        } else if (title.includes('hedef') || title.includes('birikim') || title.includes('tasarruf')) {
+            actionType = 'create_goal';
+            defaults = { title: action.title, target_amount: '', metric_type: 'savings' };
+        } else if (title.includes('abonelik') || title.includes('iptal')) {
+            actionType = 'cancel_subscription';
+            defaults = { subscription_name: '' };
+        }
+
+        setApplyingAction(action);
+        setApplyForm({ action_type: actionType, ...defaults });
+    };
+
+    const handleApplyAction = async () => {
+        if (!applyingAction) return;
+        try {
+            setApplyLoading(true);
+            await api.applyAIAction(applyingAction.id, applyForm);
+            toast.show.success('Aksiyon uygulandı! ✨');
+            setApplyingAction(null);
+            setApplyForm({});
+            await loadAll();
+        } catch (error) {
+            toast.show.error(error.message || 'Aksiyon uygulanamadı');
+        } finally {
+            setApplyLoading(false);
+        }
+    };
+
     const keyMetrics = useMemo(() => {
         const fh = overview?.financial_health || {};
         const st = overview?.structure || {};
@@ -224,6 +337,86 @@ const Insights = () => {
 
     return (
         <DashboardLayout>
+            {/* Apply Action Modal */}
+            {applyingAction && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setApplyingAction(null)}>
+                    <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 w-full max-w-md shadow-2xl border border-slate-200 dark:border-slate-800" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center gap-3 mb-6">
+                            <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-600 flex items-center justify-center">
+                                <span className="material-icons-round">bolt</span>
+                            </div>
+                            <div>
+                                <h3 className="font-bold text-slate-900 dark:text-white">Aksiyonu Uygula</h3>
+                                <p className="text-xs text-slate-500 truncate max-w-[280px]">{applyingAction.title}</p>
+                            </div>
+                        </div>
+
+                        <div className="space-y-4">
+                            <div>
+                                <label className="text-xs font-bold text-slate-500 uppercase block mb-1">İşlem Tipi</label>
+                                <select
+                                    value={applyForm.action_type}
+                                    onChange={e => {
+                                        const t = e.target.value;
+                                        if (t === 'set_budget') setApplyForm({ action_type: t, category_name: '', amount: '' });
+                                        else if (t === 'create_goal') setApplyForm({ action_type: t, title: applyingAction.title, target_amount: '', metric_type: 'savings' });
+                                        else if (t === 'cancel_subscription') setApplyForm({ action_type: t, subscription_name: '' });
+                                    }}
+                                    className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-3 text-sm font-medium outline-none"
+                                >
+                                    <option value="set_budget">Bütçe Hedefi Belirle</option>
+                                    <option value="create_goal">Finansal Hedef Oluştur</option>
+                                    <option value="cancel_subscription">Abonelik İptal Et</option>
+                                </select>
+                            </div>
+
+                            {applyForm.action_type === 'set_budget' && (
+                                <>
+                                    <div>
+                                        <label className="text-xs font-bold text-slate-500 uppercase block mb-1">Kategori</label>
+                                        <input type="text" placeholder="Örn: Market, Kafe" value={applyForm.category_name || ''} onChange={e => setApplyForm({ ...applyForm, category_name: e.target.value })} className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-3 text-sm outline-none" />
+                                    </div>
+                                    <div>
+                                        <label className="text-xs font-bold text-slate-500 uppercase block mb-1">Aylık Limit (TL)</label>
+                                        <input type="number" step="0.01" placeholder="0.00" value={applyForm.amount || ''} onChange={e => setApplyForm({ ...applyForm, amount: e.target.value })} className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-3 text-sm font-bold outline-none" />
+                                    </div>
+                                </>
+                            )}
+
+                            {applyForm.action_type === 'create_goal' && (
+                                <>
+                                    <div>
+                                        <label className="text-xs font-bold text-slate-500 uppercase block mb-1">Hedef Başlığı</label>
+                                        <input type="text" value={applyForm.title || ''} onChange={e => setApplyForm({ ...applyForm, title: e.target.value })} className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-3 text-sm outline-none" />
+                                    </div>
+                                    <div>
+                                        <label className="text-xs font-bold text-slate-500 uppercase block mb-1">Hedef Tutar (TL)</label>
+                                        <input type="number" step="0.01" value={applyForm.target_amount || ''} onChange={e => setApplyForm({ ...applyForm, target_amount: e.target.value })} className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-3 text-sm font-bold outline-none" />
+                                    </div>
+                                </>
+                            )}
+
+                            {applyForm.action_type === 'cancel_subscription' && (
+                                <div>
+                                    <label className="text-xs font-bold text-slate-500 uppercase block mb-1">Abonelik Adı</label>
+                                    <input type="text" placeholder="Örn: Netflix" value={applyForm.subscription_name || ''} onChange={e => setApplyForm({ ...applyForm, subscription_name: e.target.value })} className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-3 text-sm outline-none" />
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="flex gap-3 mt-6">
+                            <button onClick={() => setApplyingAction(null)} className="flex-1 py-3 rounded-xl font-bold text-slate-600 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
+                                İptal
+                            </button>
+                            <button onClick={handleApplyAction} disabled={applyLoading} className="flex-1 py-3 rounded-xl font-bold text-white bg-emerald-600 hover:bg-emerald-700 shadow-lg shadow-emerald-200 dark:shadow-none transition-all disabled:opacity-70 flex items-center justify-center gap-2">
+                                {applyLoading ? <span className="material-icons-round animate-spin text-sm">refresh</span> : <span className="material-icons-round text-sm">bolt</span>}
+                                {applyLoading ? 'Uygulanıyor...' : 'Uygula'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* Header */}
             <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between bg-white dark:bg-slate-900 p-6 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800">
                 <div>
@@ -233,14 +426,30 @@ const Insights = () => {
                     </h1>
                     <p className="text-sm text-slate-500 mt-1">Finansal sağlığınız, aksiyon planlarınız ve hedefleriniz tek bir yerde.</p>
                 </div>
-                <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-800 p-1 rounded-lg">
-                    <span className="material-icons-round text-slate-400 ml-2 text-sm">calendar_today</span>
-                    <input
-                        type="month"
-                        value={month}
-                        onChange={(e) => setMonth(e.target.value)}
-                        className="bg-transparent border-none text-sm font-bold text-slate-700 dark:text-slate-200 focus:ring-0 cursor-pointer"
-                    />
+                <div className="flex flex-col sm:flex-row items-end sm:items-center gap-3">
+                    <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-800 p-1 rounded-lg">
+                        <span className="material-icons-round text-slate-400 ml-2 text-sm">support_agent</span>
+                        <select
+                            value={persona}
+                            onChange={(e) => handlePersonaChange(e.target.value)}
+                            className="bg-transparent border-none text-sm font-bold text-slate-700 dark:text-slate-200 focus:ring-0 cursor-pointer pr-8"
+                        >
+                            <option value="friendly">Samimi Koç</option>
+                            <option value="professional">Profesyonel</option>
+                            <option value="strict">Disiplinli</option>
+                            <option value="humorous">Esprili</option>
+                        </select>
+                    </div>
+
+                    <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-800 p-1 rounded-lg">
+                        <span className="material-icons-round text-slate-400 ml-2 text-sm">calendar_today</span>
+                        <input
+                            type="month"
+                            value={month}
+                            onChange={(e) => setMonth(e.target.value)}
+                            className="bg-transparent border-none text-sm font-bold text-slate-700 dark:text-slate-200 focus:ring-0 cursor-pointer"
+                        />
+                    </div>
                 </div>
             </div>
 
@@ -296,6 +505,45 @@ const Insights = () => {
                 ))}
             </div>
 
+            {/* Impact Tracking Panel */}
+            {impactData && impactData.totalActions > 0 && (
+                <div className="mb-8 bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-900/20 dark:to-teal-900/20 rounded-2xl p-6 border border-emerald-200 dark:border-emerald-800/50">
+                    <div className="flex items-center gap-3 mb-4">
+                        <div className="w-10 h-10 rounded-xl bg-emerald-500 text-white flex items-center justify-center shadow-lg shadow-emerald-500/20">
+                            <span className="material-icons-round">trending_up</span>
+                        </div>
+                        <div>
+                            <h3 className="font-bold text-emerald-900 dark:text-emerald-300">AI Etki Takibi</h3>
+                            <p className="text-xs text-emerald-700 dark:text-emerald-400">Geçen ay önerilerden {impactData.completedActions}/{impactData.totalActions} tanesini uyguladınız</p>
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-3 gap-4">
+                        <div className="bg-white/60 dark:bg-slate-800/50 rounded-xl p-4 text-center">
+                            <p className="text-2xl font-bold text-emerald-700 dark:text-emerald-400">%{impactData.completionRate}</p>
+                            <p className="text-[10px] font-bold text-emerald-600/70 uppercase">Tamamlanma</p>
+                        </div>
+                        <div className="bg-white/60 dark:bg-slate-800/50 rounded-xl p-4 text-center">
+                            <p className="text-2xl font-bold text-teal-700 dark:text-teal-400">%{impactData.currentSavingsRate}</p>
+                            <p className="text-[10px] font-bold text-teal-600/70 uppercase">Mevcut Tasarruf</p>
+                        </div>
+                        <div className="bg-white/60 dark:bg-slate-800/50 rounded-xl p-4 text-center">
+                            <p className="text-2xl font-bold text-indigo-700 dark:text-indigo-400">{impactData.completedActions}</p>
+                            <p className="text-[10px] font-bold text-indigo-600/70 uppercase">Uygulanan</p>
+                        </div>
+                    </div>
+                    {impactData.topCompleted.length > 0 && (
+                        <div className="mt-4 space-y-2">
+                            {impactData.topCompleted.map((action) => (
+                                <div key={action.id} className="flex items-center gap-2 text-xs bg-white/40 dark:bg-slate-800/30 rounded-lg px-3 py-2">
+                                    <span className="material-icons-round text-emerald-500 text-sm">check_circle</span>
+                                    <span className="font-medium text-emerald-800 dark:text-emerald-300">{action.title}</span>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            )}
+
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                 {/* Left Column */}
                 <div className="lg:col-span-2 space-y-8">
@@ -323,7 +571,7 @@ const Insights = () => {
                         </div>
                     </div>
 
-                    {/* AI Actions */}
+                    {/* AI Actions with Apply Buttons */}
                     <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-800">
                         <div className="flex items-center justify-between mb-6">
                             <h3 className="font-bold text-lg text-slate-800 dark:text-white flex items-center gap-2">
@@ -370,12 +618,24 @@ const Insights = () => {
                                             )}
                                         </div>
                                     </div>
-                                    <button
-                                        onClick={() => handleDeleteAction(action.id)}
-                                        className="text-slate-300 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100 p-1"
-                                    >
-                                        <span className="material-icons-round text-lg">delete_outline</span>
-                                    </button>
+                                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        {action.status !== 'done' && (
+                                            <button
+                                                onClick={() => openApplyModal(action)}
+                                                className="p-1.5 text-emerald-400 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 rounded-lg transition-all"
+                                                title="Uygula"
+                                            >
+                                                <span className="material-icons-round text-lg">bolt</span>
+                                            </button>
+                                        )}
+                                        <button
+                                            onClick={() => handleDeleteAction(action.id)}
+                                            className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-all"
+                                            title="Sil"
+                                        >
+                                            <span className="material-icons-round text-lg">delete_outline</span>
+                                        </button>
+                                    </div>
                                 </div>
                             ))}
                             {aiActions.length === 0 && (
@@ -394,7 +654,6 @@ const Insights = () => {
                                 <span className="material-icons-round text-amber-500">flag</span>
                                 Finansal Hedefler
                             </h3>
-                            <button className="text-xs font-bold text-indigo-600 hover:text-indigo-700">Tümünü Gör</button>
                         </div>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             {goals.map((goal) => {
@@ -420,12 +679,22 @@ const Insights = () => {
                                                 <p className="text-sm font-medium text-slate-600">{currencyFormatter.format(goal.target_amount || 0)}</p>
                                             </div>
                                         </div>
-                                        <div className="relative h-2.5 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                                        <div className="relative h-2.5 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden mb-1">
                                             <div
                                                 className={`absolute top-0 left-0 h-full rounded-full transition-all duration-1000 ${isCompleted ? 'bg-emerald-500' : 'bg-indigo-500'}`}
                                                 style={{ width: `${pct}%` }}
                                             ></div>
+                                            {/* Milestone markers */}
+                                            {[25, 50, 75].map(m => (
+                                                <div key={m} className={`absolute top-0 bottom-0 w-0.5 ${pct >= m ? 'bg-white/50' : 'bg-slate-300 dark:bg-slate-600'}`} style={{ left: `${m}%` }}></div>
+                                            ))}
                                         </div>
+                                        {/* Next Milestone Text */}
+                                        {!isCompleted && (
+                                            <p className="text-[10px] text-slate-500 font-medium">
+                                                Sonraki kilometre taşı: {currencyFormatter.format(goal.target_amount * ([25, 50, 75, 100].find(m => pct < m) / 100))} (%{[25, 50, 75, 100].find(m => pct < m)})
+                                            </p>
+                                        )}
                                         <div className="mt-3 flex justify-end gap-2 opacity-80 hover:opacity-100 transition-opacity">
                                             {editingGoalId === goal.id ? (
                                                 <>
@@ -470,7 +739,7 @@ const Insights = () => {
 
                 {/* Right Column */}
                 <div className="space-y-8">
-                    {/* What-if Simulator */}
+                    {/* What-if Simulator (Multi-scenario) */}
                     <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-800">
                         <h3 className="font-bold text-lg text-slate-800 dark:text-white mb-4 flex items-center gap-2">
                             <span className="material-icons-round text-violet-500">science</span>
@@ -482,7 +751,7 @@ const Insights = () => {
                                 <select
                                     value={whatIfCategory}
                                     onChange={(e) => setWhatIfCategory(e.target.value)}
-                                    className="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-xl px-4 py-2.5 text-sm font-medium focus:ring-2 focus:ring-violet-500"
+                                    className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2.5 text-sm font-medium focus:ring-2 focus:ring-violet-500/20 outline-none"
                                 >
                                     <option value="">En yüksek harcama yapılan</option>
                                     {whatIfCategories.map((name) => <option key={name} value={name}>{name}</option>)}
@@ -507,24 +776,35 @@ const Insights = () => {
                                     <span>%40</span>
                                 </div>
                             </div>
-                            <button
-                                onClick={handleWhatIfRun}
-                                className="w-full bg-violet-600 hover:bg-violet-700 text-white py-3 rounded-xl text-sm font-bold shadow-lg shadow-violet-200 transition-all active:scale-95"
-                            >
-                                Simüle Et
-                            </button>
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={handleWhatIfRun}
+                                    className="flex-1 bg-violet-600 hover:bg-violet-700 text-white py-3 rounded-xl text-sm font-bold shadow-lg shadow-violet-200 dark:shadow-none transition-all active:scale-95"
+                                >
+                                    Simüle Et
+                                </button>
+                                {whatIfData?.scenario && (
+                                    <button
+                                        onClick={handleSaveScenario}
+                                        className="px-4 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 py-3 rounded-xl text-sm font-bold transition-all"
+                                        title="Senaryoyu Karşılaştırma Listesine Ekle"
+                                    >
+                                        <span className="material-icons-round text-lg">bookmark_add</span>
+                                    </button>
+                                )}
+                            </div>
                             {whatIfLoading ? (
                                 <p className="text-center text-xs text-slate-400 animate-pulse mt-2">Hesaplanıyor...</p>
                             ) : whatIfData?.scenario && (
-                                <div className="mt-2 bg-emerald-50 border border-emerald-100 rounded-xl p-4">
+                                <div className="mt-2 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-100 dark:border-emerald-800/50 rounded-xl p-4">
                                     <div className="flex items-center gap-2 mb-2">
                                         <span className="material-icons-round text-emerald-500 text-lg">check_circle</span>
-                                        <p className="text-emerald-800 font-bold text-sm">Sonuçlar</p>
+                                        <p className="text-emerald-800 dark:text-emerald-300 font-bold text-sm">Sonuçlar</p>
                                     </div>
-                                    <div className="space-y-1 text-xs text-emerald-700">
+                                    <div className="space-y-1 text-xs text-emerald-700 dark:text-emerald-400">
                                         <p className="flex justify-between"><span>Hedef Kategori:</span> <span className="font-bold">{whatIfData.scenario.category}</span></p>
                                         <p className="flex justify-between"><span>Potansiyel Tasarruf:</span> <span className="font-bold">{currencyFormatter.format(whatIfData.scenario.estimated_saving || 0)}</span></p>
-                                        <div className="h-px bg-emerald-200 my-2"></div>
+                                        <div className="h-px bg-emerald-200 dark:bg-emerald-700 my-2"></div>
                                         <p className="flex justify-between items-center">
                                             <span>Yeni Tasarruf Oranı:</span>
                                             <span className="font-bold text-lg">%{whatIfData.scenario.projected_savings_rate ?? 0}</span>
@@ -533,6 +813,27 @@ const Insights = () => {
                                 </div>
                             )}
                         </div>
+
+                        {/* Saved scenarios for comparison */}
+                        {scenarios.length > 0 && (
+                            <div className="mt-6 pt-4 border-t border-slate-100 dark:border-slate-800">
+                                <div className="flex items-center justify-between mb-3">
+                                    <h4 className="text-xs font-bold text-slate-500 uppercase">Kaydedilen Senaryolar</h4>
+                                    <button onClick={() => setScenarios([])} className="text-[10px] font-bold text-slate-400 hover:text-red-500">Temizle</button>
+                                </div>
+                                <div className="space-y-2">
+                                    {scenarios.map((s) => (
+                                        <div key={s.id} className="flex items-center justify-between bg-slate-50 dark:bg-slate-800/50 rounded-lg px-3 py-2 text-xs border border-slate-100 dark:border-slate-700">
+                                            <span className="font-bold text-slate-700 dark:text-slate-300">{s.label}</span>
+                                            <div className="flex items-center gap-3">
+                                                <span className="text-emerald-600 font-bold">{currencyFormatter.format(s.estimated_saving)}</span>
+                                                <span className="text-violet-600 font-bold">%{s.projected_savings_rate}</span>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
                     </div>
 
                     {/* New Goal Form */}
@@ -548,7 +849,7 @@ const Insights = () => {
                                     value={goalForm.title}
                                     onChange={(e) => setGoalForm((prev) => ({ ...prev, title: e.target.value }))}
                                     placeholder="Örn: Tatil Birikimi"
-                                    className="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500"
+                                    className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500/20 outline-none"
                                     required
                                 />
                             </div>
@@ -560,7 +861,7 @@ const Insights = () => {
                                         value={goalForm.target_amount}
                                         onChange={(e) => setGoalForm((prev) => ({ ...prev, target_amount: e.target.value }))}
                                         placeholder="0.00"
-                                        className="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500"
+                                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500/20 outline-none"
                                         required
                                     />
                                 </div>
@@ -571,7 +872,7 @@ const Insights = () => {
                                         value={goalForm.current_amount}
                                         onChange={(e) => setGoalForm((prev) => ({ ...prev, current_amount: e.target.value }))}
                                         placeholder="0.00"
-                                        className="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500"
+                                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500/20 outline-none"
                                     />
                                 </div>
                             </div>
@@ -581,7 +882,7 @@ const Insights = () => {
                                     <select
                                         value={goalForm.metric_type}
                                         onChange={(e) => setGoalForm((prev) => ({ ...prev, metric_type: e.target.value }))}
-                                        className="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500"
+                                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500/20 outline-none"
                                     >
                                         <option value="savings">Birikim</option>
                                         <option value="expense_reduction">Gider Azaltma</option>
@@ -594,14 +895,14 @@ const Insights = () => {
                                         type="date"
                                         value={goalForm.target_date}
                                         onChange={(e) => setGoalForm((prev) => ({ ...prev, target_date: e.target.value }))}
-                                        className="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500"
+                                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500/20 outline-none"
                                     />
                                 </div>
                             </div>
                             <button
                                 type="submit"
                                 disabled={savingGoal}
-                                className="w-full bg-slate-900 hover:bg-slate-800 text-white py-3 rounded-xl text-sm font-bold shadow-lg shadow-slate-200 transition-all active:scale-95 disabled:opacity-70 disabled:cursor-not-allowed"
+                                className="w-full bg-slate-900 hover:bg-slate-800 text-white py-3 rounded-xl text-sm font-bold shadow-lg shadow-slate-200 dark:shadow-none transition-all active:scale-95 disabled:opacity-70 disabled:cursor-not-allowed"
                             >
                                 {savingGoal ? 'Kaydediliyor...' : 'Hedefi Kaydet'}
                             </button>
@@ -610,16 +911,16 @@ const Insights = () => {
 
                     {/* Due Goals Alert */}
                     {(overview?.goals?.due_soon && overview.goals.due_soon.length > 0) && (
-                        <div className="bg-amber-50 rounded-2xl p-5 border border-amber-100">
-                            <h3 className="font-bold text-sm text-amber-800 mb-3 flex items-center gap-2">
+                        <div className="bg-amber-50 dark:bg-amber-900/20 rounded-2xl p-5 border border-amber-100 dark:border-amber-800/50">
+                            <h3 className="font-bold text-sm text-amber-800 dark:text-amber-300 mb-3 flex items-center gap-2">
                                 <span className="material-icons-round">warning_amber</span>
                                 Yaklaşan Hedef Tarihleri
                             </h3>
                             <div className="space-y-2">
                                 {overview.goals.due_soon.map((goal) => (
-                                    <div key={goal.id} className="text-xs p-3 rounded-xl bg-white/50 border border-amber-100 flex justify-between items-center">
-                                        <span className="font-bold text-amber-900">{goal.title}</span>
-                                        <span className="text-amber-700 bg-amber-100 px-2 py-0.5 rounded text-[10px] font-bold">{goal.target_date}</span>
+                                    <div key={goal.id} className="text-xs p-3 rounded-xl bg-white/50 dark:bg-slate-800/30 border border-amber-100 dark:border-amber-800/30 flex justify-between items-center">
+                                        <span className="font-bold text-amber-900 dark:text-amber-200">{goal.title}</span>
+                                        <span className="text-amber-700 bg-amber-100 dark:bg-amber-800/50 px-2 py-0.5 rounded text-[10px] font-bold">{goal.target_date}</span>
                                     </div>
                                 ))}
                             </div>

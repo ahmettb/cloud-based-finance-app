@@ -668,7 +668,7 @@ def handle_receipt_detail(user_id, receipt_id):
             cur.execute(
                 """
                 SELECT id, user_id, file_url, status, merchant_name, receipt_date, total_amount,
-                       category_id, created_at, updated_at
+                       category_id, payment_method, description, created_at, updated_at
                 FROM receipts
                 WHERE id=%s AND user_id=%s
                 """,
@@ -708,6 +708,8 @@ def handle_receipt_update(user_id, receipt_id, body):
         "total_amount": _safe_float(body.get("total_amount"), None),
         "receipt_date": body.get("receipt_date"),
         "category_id": body.get("category_id"),
+        "payment_method": body.get("payment_method") or body.get("paymentMethod"),
+        "description": body.get("description"),
     }
 
     updates = []
@@ -733,6 +735,14 @@ def handle_receipt_update(user_id, receipt_id, body):
                 values.append(cid)
         except Exception:
             pass
+
+    if allowed.get("payment_method") is not None:
+        updates.append("payment_method=%s")
+        values.append(str(allowed["payment_method"])[:40])
+
+    if allowed.get("description") is not None:
+        updates.append("description=%s")
+        values.append(str(allowed["description"])[:500])
 
     if not updates:
         return api_response(400, {"error": "No valid fields to update"})
@@ -760,6 +770,165 @@ def handle_receipt_update(user_id, receipt_id, body):
             return api_response(200, row)
     finally:
         release_db_connection(conn)
+
+
+# ── Receipt Items CRUD ───────────────────────────────────────────
+def handle_receipt_items(user_id, receipt_id, method, body, item_id=None):
+    """Manage individual line items on a receipt."""
+    body = body or {}
+    conn = get_db_connection()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            # Verify ownership
+            cur.execute("SELECT id FROM receipts WHERE id=%s AND user_id=%s", (receipt_id, user_id))
+            if not cur.fetchone():
+                return api_response(404, {"error": "Receipt not found"})
+
+            if method == "POST":
+                item_name = str(body.get("item_name") or "").strip()
+                quantity = max(int(_safe_float(body.get("quantity"), 1)), 1)
+                unit_price = _safe_float(body.get("unit_price"), 0.0)
+                total_price = _safe_float(body.get("total_price"), None) or round(unit_price * quantity, 2)
+                if not item_name:
+                    return api_response(400, {"error": "item_name is required"})
+                cur.execute(
+                    """
+                    INSERT INTO receipt_items (receipt_id, item_name, quantity, unit_price, total_price)
+                    VALUES (%s,%s,%s,%s,%s)
+                    RETURNING id, receipt_id, item_name, quantity, unit_price, total_price
+                    """,
+                    (receipt_id, item_name[:255], quantity, unit_price, total_price),
+                )
+                created = cur.fetchone()
+                conn.commit()
+                return api_response(201, created)
+
+            if method in {"PUT", "PATCH"} and item_id:
+                sets, vals = [], []
+                if body.get("item_name") is not None:
+                    sets.append("item_name=%s")
+                    vals.append(str(body["item_name"])[:255])
+                if body.get("quantity") is not None:
+                    sets.append("quantity=%s")
+                    vals.append(max(int(_safe_float(body["quantity"], 1)), 1))
+                if body.get("unit_price") is not None:
+                    sets.append("unit_price=%s")
+                    vals.append(_safe_float(body["unit_price"], 0.0))
+                if body.get("total_price") is not None:
+                    sets.append("total_price=%s")
+                    vals.append(_safe_float(body["total_price"], 0.0))
+                if not sets:
+                    return api_response(400, {"error": "No valid fields"})
+                vals.extend([item_id, receipt_id])
+                cur.execute(
+                    f"""
+                    UPDATE receipt_items SET {', '.join(sets)}
+                    WHERE id=%s AND receipt_id=%s
+                    RETURNING id, receipt_id, item_name, quantity, unit_price, total_price
+                    """,
+                    vals,
+                )
+                updated = cur.fetchone()
+                if not updated:
+                    return api_response(404, {"error": "Item not found"})
+                conn.commit()
+                return api_response(200, updated)
+
+            if method == "DELETE" and item_id:
+                cur.execute("DELETE FROM receipt_items WHERE id=%s AND receipt_id=%s RETURNING id", (item_id, receipt_id))
+                if not cur.fetchone():
+                    return api_response(404, {"error": "Item not found"})
+                conn.commit()
+                return api_response(200, {"deleted": True})
+
+            return api_response(405, {"error": "Method not allowed"})
+    finally:
+        release_db_connection(conn)
+
+
+# ── AI Action Apply (one-click) ─────────────────────────────────
+def handle_ai_action_apply(user_id, action_id, body):
+    """Execute a concrete action tied to an AI recommendation.
+    Supported action types:
+      - set_budget: {category_name, amount}
+      - create_goal: {title, target_amount, ...}
+    Marks the action as done after successful execution.
+    """
+    body = body or {}
+    action_type = str(body.get("action_type") or "").strip()
+
+    conn = get_db_connection()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            # Verify action belongs to user
+            cur.execute(
+                "SELECT id, title, status FROM ai_action_items WHERE id=%s AND user_id=%s",
+                (action_id, user_id),
+            )
+            action = cur.fetchone()
+            if not action:
+                return api_response(404, {"error": "Action not found"})
+
+            result = None
+
+            if action_type == "set_budget":
+                category_name = str(body.get("category_name") or "").strip()
+                amount = _safe_float(body.get("amount"), None)
+                if not category_name or amount is None or amount <= 0:
+                    return api_response(400, {"error": "category_name and valid amount required"})
+                cur.execute(
+                    """
+                    INSERT INTO budgets (user_id, category_name, amount)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (user_id, category_name) DO UPDATE SET amount=EXCLUDED.amount, updated_at=NOW()
+                    RETURNING id, category_name, amount
+                    """,
+                    (user_id, category_name[:100], amount),
+                )
+                result = {"type": "budget_set", "data": cur.fetchone()}
+
+            elif action_type == "create_goal":
+                title = str(body.get("title") or "").strip()
+                target_amount = _safe_float(body.get("target_amount"), None)
+                if not title or target_amount is None or target_amount <= 0:
+                    return api_response(400, {"error": "title and valid target_amount required"})
+                cur.execute(
+                    """
+                    INSERT INTO financial_goals (user_id, title, target_amount, metric_type, status)
+                    VALUES (%s, %s, %s, %s, 'active')
+                    RETURNING id, title, target_amount, status
+                    """,
+                    (user_id, title[:120], target_amount, body.get("metric_type", "savings")),
+                )
+                result = {"type": "goal_created", "data": cur.fetchone()}
+
+            elif action_type == "cancel_subscription":
+                sub_name = str(body.get("subscription_name") or "").strip()
+                if not sub_name:
+                    return api_response(400, {"error": "subscription_name required"})
+                cur.execute(
+                    "DELETE FROM subscriptions WHERE user_id=%s AND LOWER(name) = LOWER(%s) RETURNING id, name",
+                    (user_id, sub_name),
+                )
+                deleted = cur.fetchone()
+                result = {"type": "subscription_cancelled", "data": deleted}
+
+            else:
+                return api_response(400, {"error": f"Unknown action_type: {action_type}. Supported: set_budget, create_goal, cancel_subscription"})
+
+            # Mark action as done
+            cur.execute(
+                """
+                UPDATE ai_action_items SET status='done', done_at=NOW(), updated_at=NOW()
+                WHERE id=%s AND user_id=%s
+                """,
+                (action_id, user_id),
+            )
+            conn.commit()
+            return api_response(200, {"applied": True, "result": result})
+    finally:
+        release_db_connection(conn)
+
 
 def handle_receipt_process(user_id, receipt_id):
     conn = get_db_connection()
@@ -1004,6 +1173,8 @@ def handle_manual_receipt_create(user_id, body):
     total_amount = _safe_float(body.get("total_amount"), None)
     receipt_date = body.get("receipt_date") or date.today().isoformat()
     currency = str(body.get("currency") or "TRY").strip().upper()[:10]
+    payment_method = str(body.get("payment_method") or body.get("paymentMethod") or "").strip()[:40] or None
+    description = str(body.get("description") or "").strip()[:500] or None
     category_id = _resolve_category_id(
         raw_category_id=body.get("category_id"),
         raw_category_name=body.get("category_name"),
@@ -1028,11 +1199,11 @@ def handle_manual_receipt_create(user_id, body):
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
                 """
-                INSERT INTO receipts (id, user_id, file_url, status, merchant_name, receipt_date, total_amount, category_id, currency)
-                VALUES (%s,%s,%s,'completed',%s,%s,%s,%s,%s)
-                RETURNING id, merchant_name, receipt_date, total_amount, category_id, status, created_at, updated_at
+                INSERT INTO receipts (id, user_id, file_url, status, merchant_name, receipt_date, total_amount, category_id, currency, payment_method, description)
+                VALUES (%s,%s,%s,'completed',%s,%s,%s,%s,%s,%s,%s)
+                RETURNING id, merchant_name, receipt_date, total_amount, category_id, status, payment_method, description, created_at, updated_at
                 """,
-                (rid, user_id, manual_key, merchant_name[:255], receipt_date, total_amount, category_id, currency),
+                (rid, user_id, manual_key, merchant_name[:255], receipt_date, total_amount, category_id, currency, payment_method, description),
             )
             created = cur.fetchone()
             conn.commit()
@@ -1272,6 +1443,35 @@ def handle_subscriptions(user_id, method, body, sub_id):
                 created = cur.fetchone()
                 conn.commit()
                 return api_response(201, {"message": "Subscription added", "id": created["id"]})
+
+            if method in {"PUT", "PATCH"} and sub_id:
+                body = body or {}
+                cur.execute(
+                    "SELECT id FROM subscriptions WHERE id=%s AND user_id=%s",
+                    (sub_id, user_id),
+                )
+                if not cur.fetchone():
+                    return api_response(404, {"error": "Subscription not found"})
+
+                name = str(body.get("name") or "").strip()
+                amount = _safe_float(body.get("amount"), None)
+                next_payment_date = body.get("next_payment_date")
+
+                if not name or amount is None or amount <= 0:
+                    return api_response(400, {"error": "name and valid amount are required"})
+
+                cur.execute(
+                    """
+                    UPDATE subscriptions
+                    SET name=%s, amount=%s, next_payment_date=%s
+                    WHERE id=%s AND user_id=%s
+                    RETURNING id, name, amount, next_payment_date, created_at
+                    """,
+                    (name, amount, next_payment_date, sub_id, user_id),
+                )
+                updated = cur.fetchone()
+                conn.commit()
+                return api_response(200, updated)
 
             if method == "DELETE" and sub_id:
                 cur.execute("DELETE FROM subscriptions WHERE id=%s AND user_id=%s", (sub_id, user_id))
@@ -2362,8 +2562,8 @@ def handle_fixed_expense_payment_upsert(user_id, item_id, body):
         release_db_connection(conn)
 
 
-def _compute_data_signature(total_amount, receipt_count, last_upd):
-    raw = f"{_safe_float(total_amount)}-{int(receipt_count)}-{last_upd}"
+def _compute_data_signature(total_amount, receipt_count, last_upd, persona="friendly"):
+    raw = f"{_safe_float(total_amount)}-{int(receipt_count)}-{last_upd}-{persona}"
     return hashlib.md5(raw.encode("utf-8")).hexdigest()
 
 
@@ -2373,6 +2573,7 @@ def handle_ai_analyze(user_id, body):
     skip_llm = bool(body.get("skipLLM", False))
     use_cache = bool(body.get("useCache", True))
     force_recompute = bool(body.get("forceRecompute", False))
+    persona = str(body.get("persona") or "friendly").strip()
 
     conn = get_db_connection()
     try:
@@ -2425,11 +2626,10 @@ def handle_ai_analyze(user_id, body):
                         "insufficient_data": True,
                     },
                 }
-                # Save empty state so dashboard can read it later
                 try:
                     empty_meta = {
                         "generated_at": datetime.utcnow().isoformat(),
-                        "data_sig": _compute_data_signature(sig_row["total"], sig_row["count"], sig_row["last_upd"] or datetime.min),
+                        "data_sig": _compute_data_signature(sig_row["total"], sig_row["count"], sig_row["last_upd"] or datetime.min, persona),
                         "model": BEDROCK_MODEL_ID,
                         "cache_hit": False,
                         "ttl_seconds": AI_CACHE_TTL_SECONDS,
@@ -2449,7 +2649,7 @@ def handle_ai_analyze(user_id, body):
 
                 return api_response(200, empty_analysis)
 
-            current_data_sig = _compute_data_signature(sig_row["total"], sig_row["count"], sig_row["last_upd"] or datetime.min)
+            current_data_sig = _compute_data_signature(sig_row["total"], sig_row["count"], sig_row["last_upd"] or datetime.min, persona)
 
             cached_meta = None
             cached_result = None
@@ -2623,6 +2823,7 @@ def handle_ai_analyze(user_id, body):
                 "period": period,
                 "categoryMap": {str(k): v for k, v in CATEGORIES.items()},
                 "skipLLM": skip_llm,
+                "persona": persona,
             }
 
             invoke_resp = lambda_client.invoke(
@@ -2959,6 +3160,36 @@ def handle_incomes(user_id, method, body, income_id=None):
                 created = cur.fetchone()
                 conn.commit()
                 return api_response(201, created)
+
+            if method in {"PUT", "PATCH"} and income_id:
+                body = body or {}
+                cur.execute(
+                    "SELECT id FROM incomes WHERE id=%s AND user_id=%s",
+                    (income_id, user_id),
+                )
+                if not cur.fetchone():
+                    return api_response(404, {"error": "Income not found"})
+
+                source = str(body.get("source") or "").strip()
+                amount = _safe_float(body.get("amount"), None)
+                income_date = body.get("income_date")
+                description = str(body.get("description") or "").strip()
+
+                if not source or amount is None or amount <= 0:
+                    return api_response(400, {"error": "source and valid amount are required"})
+
+                cur.execute(
+                    """
+                    UPDATE incomes
+                    SET source=%s, amount=%s, income_date=%s, description=%s
+                    WHERE id=%s AND user_id=%s
+                    RETURNING id, source, amount, income_date, description, created_at
+                    """,
+                    (source, amount, income_date, description, income_id, user_id),
+                )
+                updated = cur.fetchone()
+                conn.commit()
+                return api_response(200, updated)
 
             if method == "DELETE" and income_id:
                 cur.execute("DELETE FROM incomes WHERE id=%s AND user_id=%s", (income_id, user_id))
@@ -3654,6 +3885,15 @@ def ensure_tables_exist():
             cur.execute("CREATE INDEX IF NOT EXISTS idx_fixed_items_group ON fixed_expense_items(group_id, is_active);")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_fixed_payments_item_date ON fixed_expense_payments(item_id, payment_date);")
 
+            # Safe column additions for receipts (payment_method, description)
+            cur.execute("""
+                DO $$ BEGIN
+                    ALTER TABLE receipts ADD COLUMN IF NOT EXISTS payment_method VARCHAR(40);
+                    ALTER TABLE receipts ADD COLUMN IF NOT EXISTS description TEXT;
+                EXCEPTION WHEN others THEN NULL;
+                END $$;
+            """)
+
             conn.commit()
     except Exception as e:
         logger.error(f"Table creation failed: {e}")
@@ -3782,6 +4022,8 @@ def lambda_handler(event, context):
         if path.startswith("/ai-actions/"):
             parts = path.split("/")
             action_id = parts[2] if len(parts) > 2 and parts[2] else None
+            if action_id and len(parts) > 3 and parts[3] == "apply" and method == "POST":
+                return handle_ai_action_apply(user_id, action_id, body)
             if action_id and method in {"PUT", "PATCH", "DELETE"}:
                 return handle_ai_actions(user_id, method, body, action_id, event.get("queryStringParameters") or {})
         if path == "/export" and method == "GET":
@@ -3795,6 +4037,10 @@ def lambda_handler(event, context):
                 receipt_id = parts[2]
                 if len(parts) > 3 and parts[3] == "process" and method == "POST":
                     return handle_receipt_process(user_id, receipt_id)
+                # Receipt items CRUD:  /receipts/:id/items  or  /receipts/:id/items/:itemId
+                if len(parts) > 3 and parts[3] == "items":
+                    item_id = parts[4] if len(parts) > 4 and parts[4] else None
+                    return handle_receipt_items(user_id, receipt_id, method, body, item_id)
                 if method == "GET":
                     return handle_receipt_detail(user_id, receipt_id)
                 if method == "PUT":

@@ -133,6 +133,8 @@ const Dashboard = () => {
             'Fatura': 'receipt_long',
             'Konaklama': 'hotel',
             'Ulaşım': 'directions_car',
+            'Abonelik': 'auto_renew',
+            'Eğitim': 'school',
             'Diğer': 'more_horiz'
         };
 

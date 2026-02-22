@@ -13,6 +13,8 @@ import urllib.request
 import uuid
 from datetime import date, datetime, timedelta
 
+
+
 import boto3
 import psycopg2
 from botocore.config import Config
@@ -65,14 +67,19 @@ migration_checked = False
 def _normalize_text(value):
     if value is None:
         return ""
-    text = str(value).strip().lower()
+    text = str(value).strip()
     replacements = {
-        "ı": "i", "ş": "s", "ç": "c", "ğ": "g", "ü": "u", "ö": "o",
-        "İ": "i", "Ş": "s", "Ç": "c", "Ğ": "g", "Ü": "u", "Ö": "o",
+        "İ": "i", "I": "i", "ı": "i",
+        "Ş": "s", "ş": "s",
+        "Ç": "c", "ç": "c",
+        "Ğ": "g", "ğ": "g",
+        "Ü": "u", "ü": "u",
+        "Ö": "o", "ö": "o",
     }
     for src, target in replacements.items():
         text = text.replace(src, target)
-    return text
+    return text.lower()
+
 
 CATEGORIES = {
     1: 'Market',
@@ -1354,20 +1361,36 @@ def handle_get_budgets(user_id):
 
             cur.execute(
                 """
-                SELECT category_id, SUM(total_amount) AS spent
-                FROM receipts
-                WHERE user_id=%s AND status != 'deleted' AND TO_CHAR(receipt_date, 'YYYY-MM')=%s
-                GROUP BY category_id
+                WITH receipt_spent AS (
+                    SELECT category_id, SUM(total_amount) AS spent
+                    FROM receipts
+                    WHERE user_id=%s AND status != 'deleted' AND TO_CHAR(receipt_date, 'YYYY-MM')=%s
+                    GROUP BY category_id
+                ),
+                fixed_spent AS (
+                    SELECT g.category_type, SUM(p.amount) AS spent
+                    FROM fixed_expense_payments p
+                    JOIN fixed_expense_items i ON i.id = p.item_id
+                    JOIN fixed_expense_groups g ON g.id = i.group_id
+                    WHERE p.user_id=%s AND p.status = 'paid' AND TO_CHAR(p.payment_date, 'YYYY-MM')=%s
+                    GROUP BY g.category_type
+                )
+                SELECT b.id, b.category_name, b.amount,
+                       COALESCE(rs.spent, 0) + COALESCE(fs.spent, 0) as total_spent
+                FROM budgets b
+                LEFT JOIN receipt_spent rs ON CATEGORIES[rs.category_id] = b.category_name
+                LEFT JOIN fixed_spent fs ON fs.category_type = b.category_name
+                WHERE b.user_id=%s
                 """,
-                (user_id, period),
+                (user_id, period, user_id, period, user_id),
             )
-            spent_rows = cur.fetchall()
-            spent_map = {CATEGORIES.get(r["category_id"], "Diğer"): _safe_float(r["spent"]) for r in spent_rows}
+            rows = cur.fetchall()
 
             normalized = []
             for row in rows:
-                spent = spent_map.get(row.get("category_name"), 0.0)
+                spent = _safe_float(row.get("total_spent"), 0.0)
                 limit_value = _safe_float(row.get("amount"), 0.0)
+
                 pct = round((spent / limit_value) * 100, 1) if limit_value > 0 else 0.0
                 row["spent"] = spent
                 row["percentage"] = pct
@@ -3314,40 +3337,71 @@ def handle_chart_data(user_id, params):
                 # Returns data: [{date_label, category, total}, ...]
                 cur.execute(
                     f"""
-                    SELECT TO_CHAR(receipt_date, %s) as date_label,
-                           category_id,
-                           SUM(total_amount) as total
-                    FROM receipts
-                    WHERE user_id=%s 
-                      AND status != 'deleted' 
-                      AND receipt_date >= DATE(NOW()) - INTERVAL %s
-                    GROUP BY 1, 2
-                    ORDER BY 1 ASC
+                    WITH receipt_data AS (
+                        SELECT TO_CHAR(receipt_date, %s) as date_label,
+                               category_id,
+                               SUM(total_amount) as total
+                        FROM receipts
+                        WHERE user_id=%s AND status != 'deleted' AND receipt_date >= DATE(NOW()) - INTERVAL %s
+                        GROUP BY 1, 2
+                    ),
+                    fixed_data AS (
+                        SELECT TO_CHAR(p.payment_date, %s) as date_label,
+                               g.category_type,
+                               SUM(p.amount) as total
+                        FROM fixed_expense_payments p
+                        JOIN fixed_expense_items i ON i.id = p.item_id
+                        JOIN fixed_expense_groups g ON g.id = i.group_id
+                        WHERE p.user_id=%s AND p.status = 'paid' AND p.payment_date >= DATE(NOW()) - INTERVAL %s
+                        GROUP BY 1, 2
+                    )
+                    SELECT date_label, category_id, NULL as category_type, total, 'receipt' as source FROM receipt_data
+                    UNION ALL
+                    SELECT date_label, NULL as category_id, category_type, total, 'fixed' as source FROM fixed_data
+                    ORDER BY date_label ASC
                     """,
-                    (date_format, user_id, db_interval)
+                    (date_format, user_id, db_interval, date_format, user_id, db_interval)
                 )
                 rows = cur.fetchall()
-                # Enrich with category names
-                for row in rows:
-                    row["category_name"] = CATEGORIES.get(row.get("category_id"), "Diğer")
                 
-                return api_response(200, {"data": rows, "range": rng, "type": "category", "is_daily": is_daily})
+                # Consolidate and enrich
+                consolidated = {}
+                for row in rows:
+                    key = (row["date_label"], row["category_id"] if row["source"] == "receipt" else row["category_type"])
+                    cat_name = CATEGORIES.get(row.get("category_id"), row.get("category_type") or "Diğer")
+                    
+                    c_key = (row["date_label"], cat_name)
+                    if c_key not in consolidated:
+                        consolidated[c_key] = {"date_label": row["date_label"], "category_name": cat_name, "total": 0.0}
+                    consolidated[c_key]["total"] += _safe_float(row["total"])
+                
+                return api_response(200, {"data": list(consolidated.values()), "range": rng, "type": "category", "is_daily": is_daily})
             
             else:
-                # Total Trend
+                # Total Trend (Receipts + Fixed)
                 cur.execute(
                     f"""
-                    SELECT TO_CHAR(receipt_date, %s) as date_label,
-                           SUM(total_amount) as total
-                    FROM receipts
-                    WHERE user_id=%s 
-                      AND status != 'deleted' 
-                      AND receipt_date >= DATE(NOW()) - INTERVAL %s
+                    WITH trend_data AS (
+                        SELECT TO_CHAR(receipt_date, %s) as date_label,
+                               SUM(total_amount) as total
+                        FROM receipts
+                        WHERE user_id=%s AND status != 'deleted' AND receipt_date >= DATE(NOW()) - INTERVAL %s
+                        GROUP BY 1
+                        UNION ALL
+                        SELECT TO_CHAR(payment_date, %s) as date_label,
+                               SUM(amount) as total
+                        FROM fixed_expense_payments
+                        WHERE user_id=%s AND status = 'paid' AND payment_date >= DATE(NOW()) - INTERVAL %s
+                        GROUP BY 1
+                    )
+                    SELECT date_label, SUM(total) as total
+                    FROM trend_data
                     GROUP BY 1
                     ORDER BY 1 ASC
                     """,
-                    (date_format, user_id, db_interval)
+                    (date_format, user_id, db_interval, date_format, user_id, db_interval)
                 )
+
                 rows = cur.fetchall()
                 return api_response(200, {"data": rows, "range": rng, "type": "total", "is_daily": is_daily})
     finally:

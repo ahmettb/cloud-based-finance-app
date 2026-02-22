@@ -1448,6 +1448,7 @@ def run_analysis(payload):
             'active_count': len([g for g in goals if str(g.get('status', 'active')).lower() == 'active']),
             'total_count': len(goals),
         },
+        
         'meta': {
             'model_version': BEDROCK_MODEL_ID,
             'generated_at': datetime.utcnow().isoformat() + 'Z',

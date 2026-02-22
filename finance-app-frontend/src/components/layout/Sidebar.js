@@ -19,7 +19,7 @@ const Sidebar = ({ isOpen, onClose }) => {
             <div className="p-6">
                 <div className="flex items-center gap-3 text-primary mb-10">
                     <span className="material-icons-round text-3xl">query_stats</span>
-                    <span className="text-xl font-bold tracking-tight text-slate-900 dark:text-white">FinAI</span>
+                    <span className="text-xl font-bold tracking-tight text-slate-900 dark:text-white">ParamNerede</span>
                 </div>
 
                 <nav className="space-y-2">

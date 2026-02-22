@@ -4009,8 +4009,14 @@ def lambda_handler(event, context):
     maybe_run_migrations_once()
 
     try:
-        method = event.get("httpMethod", "")
-        path = (event.get("path") or "").rstrip("/") or "/"
+        method = event.get("httpMethod") or event.get("requestContext", {}).get("http", {}).get("method", "")
+        path = event.get("path") or event.get("rawPath") or "/"
+        
+        # Remove /backend prefix if API Gateway sends it
+        if path.startswith("/backend/"):
+            path = path[len("/backend"):]
+        
+        path = path.rstrip("/") or "/"
 
         if method == "OPTIONS":
             return api_response(200, {})

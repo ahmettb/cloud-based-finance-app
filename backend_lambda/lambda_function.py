@@ -396,10 +396,6 @@ def handle_auth_register(body):
         return api_response(500, {"error": "COGNITO_CLIENT_ID missing"})
 
     try:
-        # Generate a UUID for the username to avoid "Username cannot be of email format" error
-        # Cognito will still allow login via email alias if configured properly.
-        username_uuid = str(uuid.uuid4())
-        
         attributes = [
             {"Name": "email", "Value": email},
             {"Name": "name", "Value": full_name or email.split('@')[0]},
@@ -409,7 +405,7 @@ def handle_auth_register(body):
 
         response = cognito.sign_up(
             ClientId=COGNITO_CLIENT_ID,
-            Username=username_uuid,
+            Username=email,
             Password=password,
             UserAttributes=attributes,
         )
@@ -427,6 +423,31 @@ def handle_auth_register(body):
     except Exception as exc:
         logger.error(f"register failed: {exc}", exc_info=True)
         return api_response(500, {"error": "Registration failed"})
+
+
+def handle_auth_confirm(body):
+    email = (body or {}).get("email")
+    code = (body or {}).get("code")
+
+    if not email or not code:
+        return api_response(400, {"error": "email and code are required"})
+    if not COGNITO_CLIENT_ID:
+        return api_response(500, {"error": "COGNITO_CLIENT_ID missing"})
+
+    try:
+        response = cognito.confirm_sign_up(
+            ClientId=COGNITO_CLIENT_ID,
+            Username=email,
+            ConfirmationCode=code
+        )
+        return api_response(200, {"message": "Account confirmed successfully"})
+    except cognito.exceptions.CodeMismatchException:
+        return api_response(400, {"error": "Invalid confirmation code"})
+    except cognito.exceptions.ExpiredCodeException:
+        return api_response(400, {"error": "Confirmation code expired"})
+    except Exception as exc:
+        logger.error(f"confirm failed: {exc}", exc_info=True)
+        return api_response(500, {"error": "Confirmation failed"})
 
 
 def handle_auth_login(body):
@@ -4038,6 +4059,8 @@ def lambda_handler(event, context):
             return handle_auth_login(body)
         if path == "/auth/register" and method == "POST":
             return handle_auth_register(body)
+        if path == "/auth/confirm" and method == "POST":
+            return handle_auth_confirm(body)
         if path == "/auth/refresh" and method == "POST":
             return handle_auth_refresh(body)
 

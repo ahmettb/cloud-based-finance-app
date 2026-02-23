@@ -119,6 +119,23 @@ export const api = {
         return response.json();
     },
 
+    confirm: async (email, code) => {
+        const response = await fetch(`${API_BASE_URL}/auth/confirm`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, code }),
+        });
+        if (!response.ok) {
+            let errMsg = 'Confirmation failed';
+            try {
+                const err = await response.json();
+                errMsg = err.error || errMsg;
+            } catch (e) { }
+            throw new Error(errMsg);
+        }
+        return response.json();
+    },
+
     logout: () => {
         localStorage.clear();
         window.location.href = '/login';

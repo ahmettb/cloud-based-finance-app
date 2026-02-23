@@ -6,6 +6,7 @@ import { useToast } from '../context/ToastContext';
 
 const Login = () => {
     const [isLogin, setIsLogin] = useState(true);
+    const [isConfirming, setIsConfirming] = useState(false);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
     const { login } = useAuth();
@@ -15,7 +16,8 @@ const Login = () => {
     const [formData, setFormData] = useState({
         email: '',
         password: '',
-        full_name: ''
+        full_name: '',
+        code: ''
     });
 
     const handleSubmit = async (e) => {
@@ -24,14 +26,19 @@ const Login = () => {
         setLoading(true);
 
         try {
-            if (isLogin) {
+            if (isConfirming) {
+                await api.confirm(formData.email, formData.code);
+                toast.show.success('Hesabınız doğrulandı! Lütfen giriş yapın.');
+                setIsConfirming(false);
+                setIsLogin(true);
+            } else if (isLogin) {
                 await login(formData.email, formData.password);
                 toast.show.success('Giriş başarılı');
                 navigate('/');
             } else {
                 await api.register(formData.email, formData.password, formData.full_name);
-                toast.show.success('Kayıt başarılı! Lütfen giriş yapın.');
-                setIsLogin(true);
+                toast.show.success('Kayıt başarılı! Lütfen e-postanıza gelen kodu girin.');
+                setIsConfirming(true);
             }
         } catch (err) {
             const msg = err.message || 'Bir hata oluştu.';
@@ -60,43 +67,70 @@ const Login = () => {
                 )}
 
                 <form onSubmit={handleSubmit} className="space-y-5">
-                    {!isLogin && (
-                        <div>
-                            <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Ad Soyad</label>
-                            <input
-                                type="text"
-                                required
-                                className="w-full px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 focus:ring-2 focus:ring-primary/50 outline-none transition-all font-medium"
-                                placeholder="Örn: Ahmet Yılmaz"
-                                value={formData.full_name}
-                                onChange={(e) => setFormData({ ...formData, full_name: e.target.value })}
-                            />
-                        </div>
+                    {isConfirming ? (
+                        <>
+                            <div>
+                                <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">E-posta Adresi</label>
+                                <input
+                                    type="email"
+                                    disabled
+                                    className="w-full px-4 py-3 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 outline-none font-medium text-slate-500 cursor-not-allowed"
+                                    value={formData.email}
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Doğrulama Kodu</label>
+                                <input
+                                    type="text"
+                                    required
+                                    className="w-full px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 focus:ring-2 focus:ring-primary/50 outline-none transition-all font-medium"
+                                    placeholder="Örn: 123456"
+                                    value={formData.code}
+                                    onChange={(e) => setFormData({ ...formData, code: e.target.value })}
+                                />
+                            </div>
+                        </>
+                    ) : (
+                        <>
+                            {!isLogin && (
+                                <div>
+                                    <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Ad Soyad</label>
+                                    <input
+                                        type="text"
+                                        required
+                                        className="w-full px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 focus:ring-2 focus:ring-primary/50 outline-none transition-all font-medium"
+                                        placeholder="Örn: Ahmet Yılmaz"
+                                        value={formData.full_name}
+                                        onChange={(e) => setFormData({ ...formData, full_name: e.target.value })}
+                                    />
+                                </div>
+                            )}
+
+                            <div>
+                                <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">E-posta Adresi</label>
+                                <input
+                                    type="email"
+                                    required
+                                    className="w-full px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 focus:ring-2 focus:ring-primary/50 outline-none transition-all font-medium"
+                                    placeholder="siz@sirket.com"
+                                    value={formData.email}
+                                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Şifre</label>
+                                <input
+                                    type="password"
+                                    required
+                                    className="w-full px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 focus:ring-2 focus:ring-primary/50 outline-none transition-all font-medium"
+                                    placeholder="••••••••"
+                                    value={formData.password}
+                                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                                />
+                            </div>
+                        </>
                     )}
-
-                    <div>
-                        <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">E-posta Adresi</label>
-                        <input
-                            type="email"
-                            required
-                            className="w-full px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 focus:ring-2 focus:ring-primary/50 outline-none transition-all font-medium"
-                            placeholder="siz@sirket.com"
-                            value={formData.email}
-                            onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                        />
-                    </div>
-
-                    <div>
-                        <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Şifre</label>
-                        <input
-                            type="password"
-                            required
-                            className="w-full px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 focus:ring-2 focus:ring-primary/50 outline-none transition-all font-medium"
-                            placeholder="••••••••"
-                            value={formData.password}
-                            onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                        />
-                    </div>
 
                     <button
                         type="submit"
@@ -104,21 +138,23 @@ const Login = () => {
                         className="w-full bg-primary hover:bg-primary-dark text-white font-bold py-3.5 rounded-xl shadow-lg shadow-primary/25 transition-all active:scale-[0.98] disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                     >
                         {loading && <span className="material-icons-round animate-spin text-sm">refresh</span>}
-                        {isLogin ? 'Giriş Yap' : 'Hesap Oluştur'}
+                        {isConfirming ? 'Doğrula' : isLogin ? 'Giriş Yap' : 'Hesap Oluştur'}
                     </button>
                 </form>
 
-                <div className="mt-8 pt-6 border-t border-slate-100 dark:border-slate-700 text-center">
-                    <p className="text-sm text-slate-500">
-                        {isLogin ? "Hesabınız yok mu?" : "Zaten üye misiniz?"}{" "}
-                        <button
-                            onClick={() => setIsLogin(!isLogin)}
-                            className="text-primary font-bold hover:underline transition-all"
-                        >
-                            {isLogin ? "Kayıt Olun" : "Giriş Yapın"}
-                        </button>
-                    </p>
-                </div>
+                {!isConfirming && (
+                    <div className="mt-8 pt-6 border-t border-slate-100 dark:border-slate-700 text-center">
+                        <p className="text-sm text-slate-500">
+                            {isLogin ? "Hesabınız yok mu?" : "Zaten üye misiniz?"}{" "}
+                            <button
+                                onClick={() => setIsLogin(!isLogin)}
+                                className="text-primary font-bold hover:underline transition-all"
+                            >
+                                {isLogin ? "Kayıt Olun" : "Giriş Yapın"}
+                            </button>
+                        </p>
+                    </div>
+                )}
             </div>
         </div>
     );

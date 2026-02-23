@@ -1453,45 +1453,64 @@ def handle_get_budgets(user_id):
     conn = get_db_connection()
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            # 1. Get Budgets
             cur.execute("SELECT id, user_id, category_name, amount, updated_at FROM budgets WHERE user_id=%s", (user_id,))
-            rows = cur.fetchall()
+            budgets = cur.fetchall()
 
+            # 2. Get Receipt Spent
             cur.execute(
                 """
-                WITH receipt_spent AS (
-                    SELECT category_id, SUM(total_amount) AS spent
-                    FROM receipts
-                    WHERE user_id=%s AND status != 'deleted' AND TO_CHAR(receipt_date, 'YYYY-MM')=%s
-                    GROUP BY category_id
-                ),
-                fixed_spent AS (
-                    SELECT g.category_type, SUM(p.amount) AS spent
-                    FROM fixed_expense_payments p
-                    JOIN fixed_expense_items i ON i.id = p.item_id
-                    JOIN fixed_expense_groups g ON g.id = i.group_id
-                    WHERE p.user_id=%s AND p.status = 'paid' AND TO_CHAR(p.payment_date, 'YYYY-MM')=%s
-                    GROUP BY g.category_type
-                )
-                SELECT b.id, b.category_name, b.amount,
-                       COALESCE(rs.spent, 0) + COALESCE(fs.spent, 0) as total_spent
-                FROM budgets b
-                LEFT JOIN receipt_spent rs ON CATEGORIES[rs.category_id] = b.category_name
-                LEFT JOIN fixed_spent fs ON fs.category_type = b.category_name
-                WHERE b.user_id=%s
+                SELECT category_id, SUM(total_amount) AS spent
+                FROM receipts
+                WHERE user_id=%s AND status != 'deleted' AND TO_CHAR(receipt_date, 'YYYY-MM')=%s
+                GROUP BY category_id
                 """,
-                (user_id, period, user_id, period, user_id),
+                (user_id, period)
             )
-            rows = cur.fetchall()
+            receipt_spent_rows = cur.fetchall()
+
+            # 3. Get Fixed Spent
+            cur.execute(
+                """
+                SELECT g.category_type, SUM(p.amount) AS spent
+                FROM fixed_expense_payments p
+                JOIN fixed_expense_items i ON i.id = p.item_id
+                JOIN fixed_expense_groups g ON g.id = i.group_id
+                WHERE p.user_id=%s AND p.status = 'paid' AND TO_CHAR(p.payment_date, 'YYYY-MM')=%s
+                GROUP BY g.category_type
+                """,
+                (user_id, period)
+            )
+            fixed_spent_rows = cur.fetchall()
+
+            # Map category sums in Python to avoid Postgres CATEGORIES[] syntax errors
+            receipt_spent_by_name = {}
+            for r in receipt_spent_rows:
+                cat_id = r.get("category_id")
+                if cat_id is not None:
+                    try:
+                        cat_id = int(cat_id)
+                    except ValueError:
+                        pass
+                c_name = CATEGORIES.get(cat_id, "Diğer")
+                receipt_spent_by_name[c_name] = receipt_spent_by_name.get(c_name, 0.0) + _safe_float(r.get("spent"), 0.0)
+                
+            fixed_spent_by_name = {}
+            for r in fixed_spent_rows:
+                c_name = r.get("category_type") or "Diğer"
+                fixed_spent_by_name[c_name] = fixed_spent_by_name.get(c_name, 0.0) + _safe_float(r.get("spent"), 0.0)
 
             normalized = []
-            for row in rows:
-                spent = _safe_float(row.get("total_spent"), 0.0)
-                limit_value = _safe_float(row.get("amount"), 0.0)
-
+            for b in budgets:
+                c_name = b["category_name"]
+                limit_value = _safe_float(b.get("amount"), 0.0)
+                
+                spent = receipt_spent_by_name.get(c_name, 0.0) + fixed_spent_by_name.get(c_name, 0.0)
                 pct = round((spent / limit_value) * 100, 1) if limit_value > 0 else 0.0
-                row["spent"] = spent
-                row["percentage"] = pct
-                normalized.append(row)
+                
+                b["spent"] = spent
+                b["percentage"] = pct
+                normalized.append(b)
 
             return api_response(200, {"data": normalized})
     finally:
@@ -4120,33 +4139,94 @@ def handle_ai_chat(user_id, body):
     if not query_embedding:
         return api_response(500, {"error": "Failed to generate embedding for query"})
 
-    # 2. Vector search in PostgreSQL
-    # Find top 5 most similar receipts using cosine distance (<=>)
+    # 2. Vector search in PostgreSQL & Aggregate Data Context
     conn = get_db_connection()
     context_docs = []
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            # We filter by user_id for security, and only look at non-deleted receipts
+            # Aggregate category data for the last 3 months to provide exact totals
             cur.execute(
                 """
-                SELECT id, merchant_name, total_amount, currency, receipt_date, description,
+                SELECT 
+                    TO_CHAR(receipt_date, 'YYYY-MM') as month,
+                    category_id,
+                    SUM(total_amount) as total
+                FROM receipts
+                WHERE user_id = %s AND status != 'deleted' AND receipt_date >= CURRENT_DATE - INTERVAL '3 months'
+                GROUP BY 1, 2
+                ORDER BY 1 DESC
+                """,
+                (user_id,)
+            )
+            cat_rows = cur.fetchall()
+            if cat_rows:
+                context_docs.append("--- GENEL KATEGORİ ÖZETİ (Son 3 Ay) ---")
+                for row in cat_rows:
+                    cat_name = CATEGORIES.get(row.get('category_id'), "Diğer")
+                    context_docs.append(f"Ay: {row['month'] or 'Bilinmeyen'}, Kategori: {cat_name}, Toplam: {row['total']} TL")
+                context_docs.append("---------------------------------------")
+
+            # FETCH BUDGET TARGETS
+            cur.execute("SELECT category_name, amount FROM budgets WHERE user_id = %s", (user_id,))
+            budget_rows = cur.fetchall()
+            if budget_rows:
+                context_docs.append("--- BÜTÇE HEDEFLERİ (Aylık Limitler) ---")
+                for br in budget_rows:
+                    context_docs.append(f"Kategori: {br['category_name']}, Hedef/Limit: {br['amount']} TL")
+                context_docs.append("----------------------------------------")
+
+            # FETCH GOALS
+            cur.execute("SELECT title, target_amount, current_amount, deadline FROM goals WHERE user_id = %s", (user_id,))
+            goal_rows = cur.fetchall()
+            if goal_rows:
+                context_docs.append("--- TASARRUF HEDEFLERİ ---")
+                for gr in goal_rows:
+                    context_docs.append(f"Süreç: {gr['title']}, Biriken: {gr['current_amount']} TL / Toplam Hedef: {gr['target_amount']} TL, Son Tarih: {gr['deadline'] or 'Belirtilmemiş'}")
+                context_docs.append("--------------------------")
+
+            # FETCH LAST INCOMES
+            cur.execute("SELECT source_name, amount, income_date, is_recurring FROM incomes WHERE user_id = %s ORDER BY income_date DESC LIMIT 5", (user_id,))
+            income_rows = cur.fetchall()
+            if income_rows:
+                context_docs.append("--- SON VE AKTİF GELİRLER ---")
+                for ir in income_rows:
+                    recur = 'Evet' if ir['is_recurring'] else 'Hayır'
+                    context_docs.append(f"Kaynak: {ir['source_name']}, Tutar: {ir['amount']} TL, Tarih: {ir['income_date']}, Düzenli mi: {recur}")
+                context_docs.append("-----------------------------")
+
+            # FETCH SUBSCRIPTIONS
+            cur.execute("SELECT name, amount, next_payment_date FROM subscriptions WHERE user_id = %s", (user_id,))
+            sub_rows = cur.fetchall()
+            if sub_rows:
+                context_docs.append("--- GİDER YÖNETİMİ / ABONELİKLER ---")
+                for sr in sub_rows:
+                    context_docs.append(f"Abonelik: {sr['name']}, Tutar: {sr['amount']} TL, Sonraki Ödeme: {sr['next_payment_date'] or 'Belirtilmemiş'}")
+                context_docs.append("------------------------------------")
+
+            # Vector search for top 40 most similar receipts to provide granular details
+            cur.execute(
+                """
+                SELECT id, merchant_name, total_amount, currency, receipt_date, description, category_id,
                        embedding <=> %s::vector AS distance
                 FROM receipts
                 WHERE user_id = %s
                   AND status != 'deleted'
                   AND embedding IS NOT NULL
                 ORDER BY distance ASC
-                LIMIT 5
+                LIMIT 40
                 """,
                 (json.dumps(query_embedding), user_id)
             )
             rows = cur.fetchall()
-            for r in rows:
-                desc = r.get('description') or ''
-                context_docs.append(
-                    f"Tarih: {r['receipt_date']}, Mekan: {r['merchant_name']}, "
-                    f"Tutar: {r['total_amount']} {r['currency']}, Açıklama: {desc}"
-                )
+            if rows:
+                context_docs.append("--- İLGİLİ HARCAMA KAYITLARI (Vektör Araması) ---")
+                for r in rows:
+                    desc = r.get('description') or ''
+                    cat_name = CATEGORIES.get(r.get('category_id'), 'Diğer')
+                    context_docs.append(
+                        f"Tarih: {r['receipt_date']}, Mekan: {r['merchant_name']}, Kategori: {cat_name}, "
+                        f"Tutar: {r['total_amount']} {r['currency']}, Açıklama: {desc}"
+                    )
     except Exception as e:
         logger.error(f"Vector search failed: {e}", exc_info=True)
         return api_response(500, {"error": "Database search failed"})
@@ -4157,14 +4237,14 @@ def handle_ai_chat(user_id, body):
     context_str = "\n".join(context_docs) if context_docs else "İlgili finansal veri bulunamadı."
     
     system_prompt = (
-        "Sen kullanıcının finansal verilerine erişimi olan yardımcı bir yapay zeka asistanısın. "
-        "Aşağıda kullanıcının veri tabanından sorgusuyla ilgili (vektör aramasıyla bulunmuş) en alakalı harcama kayıtları verilmiştir.\n\n"
+        "Sen kullanıcının kişisel finans asistanı 'ParamNerede' AI'sın. "
+        "Aşağıda kullanıcının veri tabanından sistemin otomatik olarak çektiği Kategori Özetleri ve en alakalı Harcama Kayıtları verilmiştir.\n\n"
         f"KULLANICI VERİLERİ (BAĞLAM):\n{context_str}\n\n"
         "Kurallar:\n"
-        "1. Kullanıcının sorusunu SADECE yukarıdaki bağlama dayanarak yanıtla.\n"
-        "2. Eğer yukarıdaki veriler soruyu yanıtlamak için yeterli değilse, bunu kibarca belirt ve tahmin yürütme.\n"
-        "3. Kısa, öz ve anlaşılır bir dil kullan. Gereksiz tekrarlardan kaçın.\n"
-        "4. Mümkünse madde imleri kullanarak okunabilirliği artır.\n"
+        "1. Çok resmi ve aşırı teknik bir dil kullanma! Sohbet havasında, cana yakın ama aynı zamanda bilgilendirici ve profesyonel ol.\n"
+        "2. Cevapların ne çok kısa olsun ne de gereksiz yere uzatılmış blok metinler olsun. İdeal bir uzunlukta tut.\n"
+        "3. Harcama kayıtlarını veya detaylı verileri listelerken MUTLAKA Markdown (madde imleri, kalın yazılar) kullan ki okunması kolay olsun.\n"
+        "4. Kullanıcının sorusunu SADECE yukarıdaki bağlama dayanarak yanıtla. Eğer aranan veri bağlamda yoksa, dürüstçe 'Kayıtlarında bulamadım' de, tahmin yürütme.\n"
         "5. Türkçe yanıt ver."
     )
 

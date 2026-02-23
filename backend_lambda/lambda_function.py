@@ -46,6 +46,7 @@ AI_CACHE_TTL_SECONDS = int(os.environ.get("AI_CACHE_TTL_SECONDS", "21600"))
 OCR_MAX_FILE_BYTES = int(os.environ.get("OCR_MAX_FILE_BYTES", "3145728"))
 ALLOWED_ORIGIN = os.environ.get("ALLOWED_ORIGIN", "*")
 TOKEN_USE_ALLOWED = {x.strip() for x in os.environ.get("TOKEN_USE_ALLOWED", "access").split(",") if x.strip()}
+TITAN_EMBEDDING_MODEL_ID = os.environ.get("TITAN_EMBEDDING_MODEL_ID", "amazon.titan-embed-text-v2:0")
 # TEMPORARILY SET TO TRUE FOR MIGRATIONS
 RUN_DB_MIGRATIONS_ON_START = True
 
@@ -341,6 +342,29 @@ def maybe_run_migrations_once():
         migration_checked = True
     except Exception as exc:
         logger.error(f"Migration check failed: {exc}")
+
+def _get_text_embedding(text):
+    """Call Amazon Titan to get embeddings for a text string."""
+    if not text or not isinstance(text, str):
+        return None
+    try:
+        # Format required for amazon.titan-embed-text-v2:0
+        payload = {
+            "inputText": text[:8000], # max input is 8k tokens
+            "dimensions": 1024,
+            "normalize": True
+        }
+        resp = bedrock_runtime.invoke_model(
+            modelId=TITAN_EMBEDDING_MODEL_ID,
+            body=json.dumps(payload),
+            accept="application/json",
+            contentType="application/json"
+        )
+        resp_body = json.loads(resp["body"].read())
+        return resp_body.get("embedding")
+    except Exception as exc:
+        logger.error(f"Embedding generation failed: {exc}", exc_info=True)
+        return None
 
 def _ensure_user_record(claims, fallback_full_name=None):
     conn = get_db_connection()
@@ -781,6 +805,31 @@ def handle_receipt_update(user_id, receipt_id, body):
         return api_response(400, {"error": "No valid fields to update"})
 
     updates.append("updated_at=NOW()")
+    
+    # Generate new embedding if key fields changed
+    if allowed["merchant_name"] or allowed["total_amount"] or allowed["category_id"] or allowed["description"]:
+        # We need the full row content to generate a good embedding
+        conn = get_db_connection()
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("SELECT merchant_name, total_amount, category_id, description, receipt_date FROM receipts WHERE id=%s", (receipt_id,))
+                existing = cur.fetchone()
+                if existing:
+                    m = allowed["merchant_name"] or existing["merchant_name"]
+                    a = allowed["total_amount"] or existing["total_amount"]
+                    c = CATEGORIES.get(allowed["category_id"] or existing["category_id"], "Diğer")
+                    d = allowed["description"] or existing["description"] or ""
+                    rd = allowed["receipt_date"] or existing["receipt_date"]
+                    embed_text = f"Tarih: {rd}. Mekan: {m}. Tutar: {a} TL. Kategori: {c}. Açıklama: {d}"
+                    vec = _get_text_embedding(embed_text)
+                    if vec:
+                        updates.append("embedding=%s")
+                        values.append(json.dumps(vec))
+        except Exception as e:
+            logger.error(f"Error preparing embedding update: {e}")
+        finally:
+            release_db_connection(conn)
+
     values.extend([receipt_id, user_id])
 
     conn = get_db_connection()
@@ -1116,11 +1165,23 @@ def handle_receipt_process(user_id, receipt_id):
             )
 
             cur.execute("DELETE FROM receipt_items WHERE receipt_id=%s", (receipt_id,))
+            items_text = []
             for item in items[:30]:
+                item_n = str(item.get("name") or "")[:255]
+                item_p = _safe_float(item.get("price"))
                 cur.execute(
                     "INSERT INTO receipt_items (receipt_id, item_name, total_price) VALUES (%s,%s,%s)",
-                    (receipt_id, str(item.get("name") or "")[:255], _safe_float(item.get("price"))),
+                    (receipt_id, item_n, item_p),
                 )
+                if item_n and item_p:
+                    items_text.append(f"{item_n} ({item_p} {currency})")
+
+            # Generate and save embedding
+            cat_name = CATEGORIES.get(category_id, "Diğer")
+            embed_text = f"Tarih: {r_date}. Mekan: {merchant}. Tutar: {amount} {currency}. Kategori: {cat_name}. Kalemler: {', '.join(items_text)}"
+            vec = _get_text_embedding(embed_text)
+            if vec:
+                cur.execute("UPDATE receipts SET embedding=%s WHERE id=%s", (json.dumps(vec), receipt_id))
 
             conn.commit()
             return api_response(
@@ -1132,7 +1193,7 @@ def handle_receipt_process(user_id, receipt_id):
                     "total_amount": amount,
                     "receipt_date": r_date,
                     "category_id": category_id,
-                    "category_name": CATEGORIES.get(category_id, "Diğer"),
+                    "category_name": cat_name,
                     "items_count": min(len(items), 30),
                     "currency": currency,
                     "ocr_data": ocr_data,
@@ -1226,22 +1287,37 @@ def handle_manual_receipt_create(user_id, body):
 
     rid = str(uuid.uuid4())
     manual_key = f"manual/{user_id}/{rid}.json"
+    
+    cat_name = CATEGORIES.get(category_id, "Diğer")
+    embed_text = f"Tarih: {receipt_date}. Mekan: {merchant_name}. Tutar: {total_amount} {currency}. Kategori: {cat_name}. Açıklama: {description or ''}"
+    vec = _get_text_embedding(embed_text)
 
     conn = get_db_connection()
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute(
-                """
-                INSERT INTO receipts (id, user_id, file_url, status, merchant_name, receipt_date, total_amount, category_id, currency, payment_method, description)
-                VALUES (%s,%s,%s,'completed',%s,%s,%s,%s,%s,%s,%s)
-                RETURNING id, merchant_name, receipt_date, total_amount, category_id, status, payment_method, description, created_at, updated_at
-                """,
-                (rid, user_id, manual_key, merchant_name[:255], receipt_date, total_amount, category_id, currency, payment_method, description),
-            )
+            if vec:
+                cur.execute(
+                    """
+                    INSERT INTO receipts (id, user_id, file_url, status, merchant_name, receipt_date, total_amount, category_id, currency, payment_method, description, embedding)
+                    VALUES (%s,%s,%s,'completed',%s,%s,%s,%s,%s,%s,%s,%s)
+                    RETURNING id, merchant_name, receipt_date, total_amount, category_id, status, payment_method, description, created_at, updated_at
+                    """,
+                    (rid, user_id, manual_key, merchant_name[:255], receipt_date, total_amount, category_id, currency, payment_method, description, json.dumps(vec)),
+                )
+            else:
+                cur.execute(
+                    """
+                    INSERT INTO receipts (id, user_id, file_url, status, merchant_name, receipt_date, total_amount, category_id, currency, payment_method, description)
+                    VALUES (%s,%s,%s,'completed',%s,%s,%s,%s,%s,%s,%s)
+                    RETURNING id, merchant_name, receipt_date, total_amount, category_id, status, payment_method, description, created_at, updated_at
+                    """,
+                    (rid, user_id, manual_key, merchant_name[:255], receipt_date, total_amount, category_id, currency, payment_method, description),
+                )
+                
             created = cur.fetchone()
             conn.commit()
 
-            created["category"] = CATEGORIES.get(category_id, "Diğer")
+            created["category"] = cat_name
             created["source"] = "manual"
             return api_response(201, created)
     finally:
@@ -3798,6 +3874,7 @@ def ensure_tables_exist():
     try:
         with conn.cursor() as cur:
             cur.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto;")
+            cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
 
             cur.execute(
                 """
@@ -4009,11 +4086,12 @@ def ensure_tables_exist():
             cur.execute("CREATE INDEX IF NOT EXISTS idx_fixed_items_group ON fixed_expense_items(group_id, is_active);")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_fixed_payments_item_date ON fixed_expense_payments(item_id, payment_date);")
 
-            # Safe column additions for receipts (payment_method, description)
+            # Safe column additions for receipts (payment_method, description, embedding)
             cur.execute("""
                 DO $$ BEGIN
                     ALTER TABLE receipts ADD COLUMN IF NOT EXISTS payment_method VARCHAR(40);
                     ALTER TABLE receipts ADD COLUMN IF NOT EXISTS description TEXT;
+                    ALTER TABLE receipts ADD COLUMN IF NOT EXISTS embedding vector(1024);
                 EXCEPTION WHEN others THEN NULL;
                 END $$;
             """)
@@ -4024,6 +4102,103 @@ def ensure_tables_exist():
     finally:
         release_db_connection(conn)
 
+
+def handle_ai_chat(user_id, body):
+    """
+    RAG Implementation:
+    1. Embed user query using Titan Embeddings
+    2. Perform vector similarity search in PostgreSQL
+    3. Pass context + query to Claude 3 Haiku for response
+    """
+    body = body or {}
+    user_query = str(body.get("query") or "").strip()
+    if not user_query:
+        return api_response(400, {"error": "Query is required"})
+
+    # 1. Embed user query
+    query_embedding = _get_text_embedding(user_query)
+    if not query_embedding:
+        return api_response(500, {"error": "Failed to generate embedding for query"})
+
+    # 2. Vector search in PostgreSQL
+    # Find top 5 most similar receipts using cosine distance (<=>)
+    conn = get_db_connection()
+    context_docs = []
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            # We filter by user_id for security, and only look at non-deleted receipts
+            cur.execute(
+                """
+                SELECT id, merchant_name, total_amount, currency, receipt_date, description,
+                       embedding <=> %s::vector AS distance
+                FROM receipts
+                WHERE user_id = %s
+                  AND status != 'deleted'
+                  AND embedding IS NOT NULL
+                ORDER BY distance ASC
+                LIMIT 5
+                """,
+                (json.dumps(query_embedding), user_id)
+            )
+            rows = cur.fetchall()
+            for r in rows:
+                desc = r.get('description') or ''
+                context_docs.append(
+                    f"Tarih: {r['receipt_date']}, Mekan: {r['merchant_name']}, "
+                    f"Tutar: {r['total_amount']} {r['currency']}, Açıklama: {desc}"
+                )
+    except Exception as e:
+        logger.error(f"Vector search failed: {e}", exc_info=True)
+        return api_response(500, {"error": "Database search failed"})
+    finally:
+        release_db_connection(conn)
+
+    # 3. Call Claude 3 Haiku with Context
+    context_str = "\n".join(context_docs) if context_docs else "İlgili finansal veri bulunamadı."
+    
+    system_prompt = (
+        "Sen kullanıcının finansal verilerine erişimi olan yardımcı bir yapay zeka asistanısın. "
+        "Aşağıda kullanıcının veri tabanından sorgusuyla ilgili (vektör aramasıyla bulunmuş) en alakalı harcama kayıtları verilmiştir.\n\n"
+        f"KULLANICI VERİLERİ (BAĞLAM):\n{context_str}\n\n"
+        "Kurallar:\n"
+        "1. Kullanıcının sorusunu SADECE yukarıdaki bağlama dayanarak yanıtla.\n"
+        "2. Eğer yukarıdaki veriler soruyu yanıtlamak için yeterli değilse, bunu kibarca belirt ve tahmin yürütme.\n"
+        "3. Kısa, öz ve anlaşılır bir dil kullan. Gereksiz tekrarlardan kaçın.\n"
+        "4. Mümkünse madde imleri kullanarak okunabilirliği artır.\n"
+        "5. Türkçe yanıt ver."
+    )
+
+    payload = {
+        "anthropic_version": "bedrock-2023-05-31",
+        "max_tokens": 1000,
+        "system": system_prompt,
+        "messages": [
+            {"role": "user", "content": user_query}
+        ]
+    }
+
+    try:
+        # Using Claude 3 Haiku for fast, cost-effective chat
+        response = bedrock_runtime.invoke_model(
+            modelId="anthropic.claude-3-haiku-20240307-v1:0",
+            body=json.dumps(payload),
+            accept="application/json",
+            contentType="application/json"
+        )
+        response_body = json.loads(response["body"].read())
+        
+        reply_text = ""
+        content_block = response_body.get("content", [])
+        if content_block and isinstance(content_block, list):
+            reply_text = content_block[0].get("text", "")
+
+        return api_response(200, {
+            "reply": reply_text,
+            "context_used": len(context_docs)
+        })
+    except Exception as exc:
+        logger.error(f"Bedrock Chat Invoke Failed: {exc}", exc_info=True)
+        return api_response(500, {"error": "AI response generation failed"})
 
 def lambda_handler(event, context):
     # Optional runtime migration (disabled by default).
@@ -4199,6 +4374,9 @@ def lambda_handler(event, context):
         if path == "/reports/ai-feedback" and method == "POST":
             return handle_reports_ai_feedback(user_id, body)
 
+        if path == "/chat" and method == "POST":
+            return handle_ai_chat(user_id, body)
+            
         return api_response(404, {"error": "Endpoint not found"})
     except Exception as exc:
         logger.error(f"FATAL: {exc}", exc_info=True)

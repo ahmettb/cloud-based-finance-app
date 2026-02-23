@@ -14,6 +14,7 @@ import Planning from './pages/Planning';
 import Expenses from './pages/Expenses';
 import Incomes from './pages/Incomes';
 import Insights from './pages/Insights';
+import AIChat from './pages/AIChat';
 
 // Global Styles
 import './App.css';
@@ -100,6 +101,12 @@ function App() {
               <Route path="/insights" element={
                 <ProtectedRoute>
                   <Insights />
+                </ProtectedRoute>
+              } />
+
+              <Route path="/chat" element={
+                <ProtectedRoute>
+                  <AIChat />
                 </ProtectedRoute>
               } />
 

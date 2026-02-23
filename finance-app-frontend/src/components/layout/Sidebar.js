@@ -58,6 +58,11 @@ const Sidebar = ({ isOpen, onClose }) => {
                         AI İçgörüler
                     </NavLink>
 
+                    <NavLink to="/chat" onClick={onClose} className={({ isActive }) => isActive ? activeClass : inactiveClass}>
+                        <span className="material-icons-round">chat</span>
+                        AI Asistan
+                    </NavLink>
+
                     <button onClick={() => { logout(); onClose && onClose(); }} className="w-full flex items-center gap-3 px-4 py-3 text-slate-500 hover:bg-red-50 hover:text-red-500 rounded-xl transition-all mt-8">
                         <span className="material-icons-round">logout</span>
                         Çıkış Yap

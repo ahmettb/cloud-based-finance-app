@@ -352,5 +352,10 @@ export const api = {
     updateReceipt: (id, data) => fetchWithAuth(`/receipts/${id}`, {
         method: 'PUT',
         body: JSON.stringify(data)
+    }),
+
+    sendChatQuery: (query) => fetchWithAuth('/chat', {
+        method: 'POST',
+        body: JSON.stringify({ query })
     })
 };

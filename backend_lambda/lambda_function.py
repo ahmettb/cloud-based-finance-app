@@ -4176,22 +4176,21 @@ def handle_ai_chat(user_id, body):
                 context_docs.append("----------------------------------------")
 
             # FETCH GOALS
-            cur.execute("SELECT title, target_amount, current_amount, deadline FROM goals WHERE user_id = %s", (user_id,))
+            cur.execute("SELECT title, target_amount, current_amount, target_date FROM financial_goals WHERE user_id = %s AND status = 'active'", (user_id,))
             goal_rows = cur.fetchall()
             if goal_rows:
                 context_docs.append("--- TASARRUF HEDEFLERİ ---")
                 for gr in goal_rows:
-                    context_docs.append(f"Süreç: {gr['title']}, Biriken: {gr['current_amount']} TL / Toplam Hedef: {gr['target_amount']} TL, Son Tarih: {gr['deadline'] or 'Belirtilmemiş'}")
+                    context_docs.append(f"Süreç: {gr['title']}, Biriken: {gr['current_amount']} TL / Toplam Hedef: {gr['target_amount']} TL, Son Tarih: {gr['target_date'] or 'Belirtilmemiş'}")
                 context_docs.append("--------------------------")
 
             # FETCH LAST INCOMES
-            cur.execute("SELECT source_name, amount, income_date, is_recurring FROM incomes WHERE user_id = %s ORDER BY income_date DESC LIMIT 5", (user_id,))
+            cur.execute("SELECT source, amount, income_date FROM incomes WHERE user_id = %s ORDER BY income_date DESC LIMIT 5", (user_id,))
             income_rows = cur.fetchall()
             if income_rows:
                 context_docs.append("--- SON VE AKTİF GELİRLER ---")
                 for ir in income_rows:
-                    recur = 'Evet' if ir['is_recurring'] else 'Hayır'
-                    context_docs.append(f"Kaynak: {ir['source_name']}, Tutar: {ir['amount']} TL, Tarih: {ir['income_date']}, Düzenli mi: {recur}")
+                    context_docs.append(f"Kaynak: {ir['source']}, Tutar: {ir['amount']} TL, Tarih: {ir['income_date']}")
                 context_docs.append("-----------------------------")
 
             # FETCH SUBSCRIPTIONS

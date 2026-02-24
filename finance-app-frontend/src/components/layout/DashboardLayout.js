@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import Sidebar from './Sidebar';
+import FloatingAIChat from '../FloatingAIChat';
 
 const DashboardLayout = ({ children }) => {
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -35,6 +36,9 @@ const DashboardLayout = ({ children }) => {
             <main className="flex-1 overflow-x-hidden overflow-y-auto bg-transparent print:ml-0 p-4 pt-16 md:p-6 transition-all print:p-0 print:overflow-visible">
                 {children}
             </main>
+
+            {/* AI Chat Widget */}
+            <FloatingAIChat />
         </div>
     );
 };

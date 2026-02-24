@@ -47,6 +47,9 @@ OCR_MAX_FILE_BYTES = int(os.environ.get("OCR_MAX_FILE_BYTES", "3145728"))
 ALLOWED_ORIGIN = os.environ.get("ALLOWED_ORIGIN", "*")
 TOKEN_USE_ALLOWED = {x.strip() for x in os.environ.get("TOKEN_USE_ALLOWED", "access").split(",") if x.strip()}
 TITAN_EMBEDDING_MODEL_ID = os.environ.get("TITAN_EMBEDDING_MODEL_ID", "amazon.titan-embed-text-v2:0")
+LANGFUSE_PUBLIC_KEY = os.environ.get("LANGFUSE_PUBLIC_KEY")
+LANGFUSE_SECRET_KEY = os.environ.get("LANGFUSE_SECRET_KEY")
+LANGFUSE_HOST = os.environ.get("LANGFUSE_HOST", "https://cloud.langfuse.com")
 # TEMPORARILY SET TO TRUE FOR MIGRATIONS
 RUN_DB_MIGRATIONS_ON_START = True
 
@@ -65,6 +68,29 @@ ssm_client = boto3.client("ssm", region_name=AWS_REGION)
 db_pool = None
 jwks_cache = None
 migration_checked = False
+langfuse_client = None
+
+def get_langfuse():
+    global langfuse_client
+    if langfuse_client is None:
+        try:
+            from langfuse import Langfuse
+            if LANGFUSE_PUBLIC_KEY and LANGFUSE_PUBLIC_KEY.startswith("ssm:"):
+                pk_val = ssm_client.get_parameter(Name=LANGFUSE_PUBLIC_KEY[4:], WithDecryption=True)["Parameter"]["Value"]
+                sk_val = ssm_client.get_parameter(Name=LANGFUSE_SECRET_KEY[4:], WithDecryption=True)["Parameter"]["Value"]
+            else:
+                pk_val = LANGFUSE_PUBLIC_KEY
+                sk_val = LANGFUSE_SECRET_KEY
+            
+            if pk_val and sk_val:
+                langfuse_client = Langfuse(public_key=pk_val, secret_key=sk_val, host=LANGFUSE_HOST)
+            else:
+                langfuse_client = False
+        except Exception as e:
+            logger.error(f"Langfuse init error: {e}")
+            langfuse_client = False
+            
+    return langfuse_client if langfuse_client is not False else None
 
 def _normalize_text(value):
     if value is None:
@@ -4270,6 +4296,15 @@ def handle_ai_chat(user_id, body):
     }
 
     try:
+        # Langfuse initialization and trace start
+        lf = get_langfuse()
+        trace = None
+        if lf:
+            trace = lf.trace(
+                name="ai-chat-response",
+                user_id=str(user_id)
+            )
+
         # Using Claude 3 Haiku for fast, cost-effective chat
         response = bedrock_runtime.invoke_model(
             modelId="anthropic.claude-3-haiku-20240307-v1:0",
@@ -4283,6 +4318,18 @@ def handle_ai_chat(user_id, body):
         content_block = response_body.get("content", [])
         if content_block and isinstance(content_block, list):
             reply_text = content_block[0].get("text", "")
+
+        # Send token records to Langfuse 
+        if trace:
+            usage = response_body.get("usage", {})
+            trace.generation(
+                name="claude-3-haiku",
+                model="anthropic.claude-3-haiku-20240307-v1:0",
+                input=payload,
+                output=reply_text,
+                usage={"input": usage.get("input_tokens", 0), "output": usage.get("output_tokens", 0)}
+            )
+            lf.flush()
 
         return api_response(200, {
             "reply": reply_text,

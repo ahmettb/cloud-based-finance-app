@@ -57,6 +57,7 @@ s3_client = boto3.client("s3", region_name=AWS_REGION, config=Config(signature_v
 cognito = boto3.client("cognito-idp", region_name=AWS_REGION)
 bedrock_runtime = boto3.client("bedrock-runtime", region_name=AWS_REGION)
 lambda_client = boto3.client("lambda", region_name=AWS_REGION)
+ssm_client = boto3.client("ssm", region_name=AWS_REGION)
 
 # ============================================================
 # GLOBAL STATE
@@ -245,16 +246,28 @@ def _resolve_category_id(raw_category_id=None, raw_category_name=None, merchant_
 
 
 def init_db_pool():
-    global db_pool
+    global db_pool, DB_PASSWORD
     if db_pool is None:
         logger.info("Initializing DB pool")
+        
+        actual_password = DB_PASSWORD
+        if actual_password and actual_password.startswith("ssm:"):
+            logger.info("Fetching DB_PASSWORD securely from AWS SSM Parameter Store")
+            try:
+                param_name = actual_password[4:]
+                resp = ssm_client.get_parameter(Name=param_name, WithDecryption=True)
+                actual_password = resp["Parameter"]["Value"]
+            except Exception as e:
+                logger.error(f"Failed to fetch DB password from SSM: {e}")
+                raise RuntimeError("Secure database credential fetch failed.")
+
         db_pool = psycopg2.pool.SimpleConnectionPool(
             minconn=1,
             maxconn=8,
             host=DB_HOST,
             database=DB_NAME,
             user=DB_USER,
-            password=DB_PASSWORD,
+            password=actual_password,
             port=DB_PORT,
             connect_timeout=8,
         )

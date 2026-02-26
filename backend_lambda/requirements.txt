@@ -1,4 +1,4 @@
 psycopg2-binary
 python-jose[cryptography]
 boto3
-langfuse
+langfuse<3.0.0

@@ -69,7 +69,11 @@ resource "aws_iam_role_policy" "lambda_ai_services_policy" {
           "ssm:GetParameter"
         ]
         Effect   = "Allow"
-        Resource = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/${var.project_name}/prod/db-password"
+        Resource = [
+          "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/${var.project_name}/prod/db-password",
+          "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/${var.project_name}/prod/langfuse-secret-key",
+          "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/${var.project_name}/prod/langfuse-public-key"
+        ]
       }
     ]
   })
@@ -86,6 +90,20 @@ resource "aws_ssm_parameter" "db_password" {
   value       = var.db_password
 }
 
+resource "aws_ssm_parameter" "langfuse_secret_key" {
+  name        = "/${var.project_name}/prod/langfuse-secret-key"
+  description = "Langfuse Secret Key"
+  type        = "SecureString"
+  value       = var.langfuse_secret_key
+}
+
+resource "aws_ssm_parameter" "langfuse_public_key" {
+  name        = "/${var.project_name}/prod/langfuse-public-key"
+  description = "Langfuse Public Key"
+  type        = "String"
+  value       = var.langfuse_public_key
+}
+
 # Backend Lambda (Private Subnet)
 resource "aws_lambda_function" "backend_lambda" {
   function_name    = "backend_lambda"
@@ -100,14 +118,6 @@ resource "aws_lambda_function" "backend_lambda" {
     security_group_ids = [aws_security_group.lambda_sg.id]
   }
 
-  layers = [
-    "arn:aws:lambda:${var.aws_region}:901920570463:layer:aws-otel-python-amd64-ver-1-24-0:1"
-  ]
-
-  tracing_config {
-    mode = "Active"
-  }
-
   environment {
     variables = {
       DB_HOST  = aws_db_instance.postgres.address
@@ -116,7 +126,6 @@ resource "aws_lambda_function" "backend_lambda" {
       DB_PORT  = aws_db_instance.postgres.port
       DB_PASSWORD = "ssm:/${var.project_name}/prod/db-password"
       NODE_ENV = "production"
-      AWS_LAMBDA_EXEC_WRAPPER = "/opt/otel-instrument"
       COGNITO_USER_POOL_ID = aws_cognito_user_pool.main.id
       COGNITO_CLIENT_ID = aws_cognito_user_pool_client.client.id
       S3_BUCKET_NAME = aws_s3_bucket.receipts_bucket.bucket
@@ -127,6 +136,9 @@ resource "aws_lambda_function" "backend_lambda" {
       ALLOWED_ORIGIN = "*"
       TOKEN_USE_ALLOWED = "access"
       TITAN_EMBEDDING_MODEL_ID = "amazon.titan-embed-text-v2:0"
+      LANGFUSE_SECRET_KEY = "ssm:/${var.project_name}/prod/langfuse-secret-key"
+      LANGFUSE_PUBLIC_KEY = "ssm:/${var.project_name}/prod/langfuse-public-key"
+      LANGFUSE_HOST       = var.langfuse_host
     }
   }
 
@@ -148,18 +160,9 @@ resource "aws_lambda_function" "lambda_ai" {
     security_group_ids = [aws_security_group.lambda_sg.id]
   }
 
-  layers = [
-    "arn:aws:lambda:${var.aws_region}:901920570463:layer:aws-otel-python-amd64-ver-1-24-0:1"
-  ]
-
-  tracing_config {
-    mode = "Active"
-  }
-
   environment {
     variables = {
       NODE_ENV = "production"
-      AWS_LAMBDA_EXEC_WRAPPER = "/opt/otel-instrument"
       COGNITO_USER_POOL_ID = aws_cognito_user_pool.main.id
       COGNITO_CLIENT_ID = aws_cognito_user_pool_client.client.id
       S3_BUCKET_NAME = aws_s3_bucket.receipts_bucket.bucket

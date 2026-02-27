@@ -4337,8 +4337,8 @@ def handle_ai_chat(user_id, body):
         f"KULLANICI VERİLERİ (BAĞLAM):\n{context_str}\n\n"
         "Kurallar:\n"
         "1. Çok resmi ve aşırı teknik bir dil kullanma! Sohbet havasında, cana yakın ama aynı zamanda bilgilendirici ve profesyonel ol.\n"
-        "2. Cevapların ne çok kısa olsun ne de gereksiz yere uzatılmış blok metinler olsun. İdeal bir uzunlukta tut.\n"
-        "3. Harcama kayıtlarını veya detaylı verileri listelerken MUTLAKA Markdown (madde imleri, kalın yazılar) kullan ki okunması kolay olsun.\n"
+        "2. KISA ve ÖZ cevap ver. Maksimum 3-4 cümle. Liste gerektiriyorsa en fazla 5 madde. Asla uzun paragraf yazma.\n"
+        "3. Harcama kayıtlarını listelerken Markdown madde imleri kullan, kalın yaz.\n"
         "4. Kullanıcının sorusunu SADECE yukarıdaki bağlama dayanarak yanıtla. Eğer aranan veri bağlamda yoksa, dürüstçe 'Kayıtlarında bulamadım' de, tahmin yürütme.\n"
         "5. Türkçe yanıt ver."
     )
@@ -4364,7 +4364,7 @@ def handle_ai_chat(user_id, body):
 
     payload = {
         "anthropic_version": "bedrock-2023-05-31",
-        "max_tokens": 1000,
+        "max_tokens": 400,
         "system": system_prompt_text,
         "messages": [
             {"role": "user", "content": user_query}

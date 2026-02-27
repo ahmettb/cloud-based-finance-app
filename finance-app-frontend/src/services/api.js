@@ -7,6 +7,9 @@ const getHeaders = (token) => ({
     ...(token ? { 'Authorization': `Bearer ${token}` } : {})
 });
 
+
+
+
 const fetchWithAuth = async (endpoint, options = {}) => {
     let token = localStorage.getItem('access_token');
     const refreshToken = localStorage.getItem('refresh_token');

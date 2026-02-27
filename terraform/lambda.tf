@@ -74,6 +74,16 @@ resource "aws_iam_role_policy" "lambda_ai_services_policy" {
           "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/${var.project_name}/prod/langfuse-secret-key",
           "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/${var.project_name}/prod/langfuse-public-key"
         ]
+      },
+      {
+        Action   = ["cloudwatch:PutMetricData"]
+        Effect   = "Allow"
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "cloudwatch:namespace" = "ParamNerede/Bedrock"
+          }
+        }
       }
     ]
   })
@@ -144,6 +154,10 @@ resource "aws_lambda_function" "backend_lambda" {
 
   timeout     = 30
   memory_size = 256
+
+  tracing_config {
+    mode = "Active"
+  }
 }
 
 # AI Lambda (Private Subnet)
@@ -183,6 +197,10 @@ resource "aws_lambda_function" "lambda_ai" {
 
   timeout     = 120
   memory_size = 512
+
+  tracing_config {
+    mode = "Active"
+  }
 }
 
 # API Gateway Permissions to Invoke Lambdas

@@ -26,8 +26,33 @@ from psycopg2 import pool
 # ============================================================
 # CONFIGURATION
 # ============================================================
+
+# --- Yapılandırılmış JSON Log Formatter ---
+class _JsonFormatter(logging.Formatter):
+    """CloudWatch Logs Insights ile yapısal sorgulama için JSON formatter."""
+    def format(self, record):
+        log_entry = {
+            "timestamp": self.formatTime(record),
+            "level": record.levelname,
+            "message": record.getMessage(),
+            "logger": record.name,
+            "request_id": getattr(record, "request_id", "-"),
+            "user_id": getattr(record, "user_id", "-"),
+        }
+        if record.exc_info and record.exc_info[0]:
+            log_entry["exception"] = self.formatException(record.exc_info)
+        return json.dumps(log_entry, ensure_ascii=False, default=str)
+
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
+# Mevcut handler'ları temizle ve JSON formatter ekle
+if logger.handlers:
+    for h in logger.handlers:
+        h.setFormatter(_JsonFormatter())
+else:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(_JsonFormatter())
+    logger.addHandler(_handler)
 
 AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
 COGNITO_USER_POOL_ID = os.environ.get("COGNITO_USER_POOL_ID")
@@ -61,6 +86,28 @@ cognito = boto3.client("cognito-idp", region_name=AWS_REGION)
 bedrock_runtime = boto3.client("bedrock-runtime", region_name=AWS_REGION)
 lambda_client = boto3.client("lambda", region_name=AWS_REGION)
 ssm_client = boto3.client("ssm", region_name=AWS_REGION)
+cw_client = boto3.client("cloudwatch", region_name=AWS_REGION)
+
+# --- Bedrock Token Kullanım Fiyatları (Claude 3 Haiku) ---
+BEDROCK_INPUT_TOKEN_PRICE = float(os.environ.get("BEDROCK_INPUT_TOKEN_PRICE", "0.00000025"))
+BEDROCK_OUTPUT_TOKEN_PRICE = float(os.environ.get("BEDROCK_OUTPUT_TOKEN_PRICE", "0.00000125"))
+
+
+def _emit_bedrock_metrics(endpoint, input_tokens, output_tokens):
+    """Bedrock token kullanımını CloudWatch Custom Metric olarak basar.
+    Failures are swallowed — observability asla ana iş akışını bozmamalı."""
+    try:
+        cost = (input_tokens * BEDROCK_INPUT_TOKEN_PRICE) + (output_tokens * BEDROCK_OUTPUT_TOKEN_PRICE)
+        cw_client.put_metric_data(
+            Namespace="ParamNerede/Bedrock",
+            MetricData=[
+                {"MetricName": "InputTokens",  "Value": input_tokens,  "Unit": "Count", "Dimensions": [{"Name": "Endpoint", "Value": endpoint}]},
+                {"MetricName": "OutputTokens", "Value": output_tokens, "Unit": "Count", "Dimensions": [{"Name": "Endpoint", "Value": endpoint}]},
+                {"MetricName": "EstimatedCost", "Value": cost,          "Unit": "None",  "Dimensions": [{"Name": "Endpoint", "Value": endpoint}]},
+            ]
+        )
+    except Exception as e:
+        logger.warning(f"Failed to emit Bedrock metrics: {e}")
 
 # ============================================================
 # GLOBAL STATE
@@ -400,6 +447,7 @@ def _get_text_embedding(text):
             contentType="application/json"
         )
         resp_body = json.loads(resp["body"].read())
+        _emit_bedrock_metrics("embedding", resp_body.get("inputTextTokenCount", 0), 0)
         return resp_body.get("embedding")
     except Exception as exc:
         logger.error(f"Embedding generation failed: {exc}", exc_info=True)
@@ -1135,6 +1183,10 @@ def handle_receipt_process(user_id, receipt_id):
                     body=json.dumps(payload)
                 )
                 resp_body = json.loads(resp["body"].read())
+                
+                # Bedrock Token Metrics
+                _usage = resp_body.get("usage", {})
+                _emit_bedrock_metrics("ocr", _usage.get("input_tokens", 0), _usage.get("output_tokens", 0))
                 
                 # Extract text content from response
                 content_block = resp_body.get("content", [])
@@ -3104,6 +3156,10 @@ def handle_smart_extract(user_id, body):
             inferenceConfig={"maxTokens": 300, "temperature": 0}
         )
         
+        # Bedrock Token Metrics
+        _usage = response.get("usage", {})
+        _emit_bedrock_metrics("smart_extract", _usage.get("inputTokens", 0), _usage.get("outputTokens", 0))
+        
         # Robust Parsing
         output_text = response["output"]["message"]["content"][0]["text"].strip()
         
@@ -4274,7 +4330,8 @@ def handle_ai_chat(user_id, body):
     # 3. Call Claude 3 Haiku with Context
     context_str = "\n".join(context_docs) if context_docs else "İlgili finansal veri bulunamadı."
     
-    system_prompt = (
+    # Varsayılan (Fallback) System Promptumuz:
+    system_prompt_text = (
         "Sen kullanıcının kişisel finans asistanı 'ParamNerede' AI'sın. "
         "Aşağıda kullanıcının veri tabanından sistemin otomatik olarak çektiği Kategori Özetleri ve en alakalı Harcama Kayıtları verilmiştir.\n\n"
         f"KULLANICI VERİLERİ (BAĞLAM):\n{context_str}\n\n"
@@ -4286,23 +4343,41 @@ def handle_ai_chat(user_id, body):
         "5. Türkçe yanıt ver."
     )
 
+    lf = get_langfuse()
+    trace = None
+    generation = None
+    
+    if lf:
+        trace = lf.trace(
+            name="ai-chat-response",
+            user_id=str(user_id)
+        )
+        
+        # PROMPT MANAGEMENT: Langfuse üzerinden güncel promptu çekmeye çalışalım
+        try:
+            # Langfuse'da 'paramnerede-system-prompt' isimli promptu arar.
+            lf_prompt = lf.get_prompt("paramnerede-system-prompt")
+            # {{context_str}} gibi değişkenleri Langfuse içerisinde kullanabilirsiniz
+            system_prompt_text = lf_prompt.compile(context_str=context_str)
+        except Exception as e:
+            logger.info(f"Langfuse Prompt bulunamadı veya çekilemedi, varsayılan kullanılıyor: {e}")
+
     payload = {
         "anthropic_version": "bedrock-2023-05-31",
         "max_tokens": 1000,
-        "system": system_prompt,
+        "system": system_prompt_text,
         "messages": [
             {"role": "user", "content": user_query}
         ]
     }
 
     try:
-        # Langfuse initialization and trace start
-        lf = get_langfuse()
-        trace = None
-        if lf:
-            trace = lf.trace(
-                name="ai-chat-response",
-                user_id=str(user_id)
+        # Latency'yi ölçebilmek için Generation'ı Bedrock isteğinden ÖNCE başlatıyoruz
+        if trace:
+            generation = trace.generation(
+                name="claude-3-haiku",
+                model="anthropic.claude-3-haiku-20240307-v1:0",
+                input=payload["messages"]
             )
 
         # Using Claude 3 Haiku for fast, cost-effective chat
@@ -4319,13 +4394,11 @@ def handle_ai_chat(user_id, body):
         if content_block and isinstance(content_block, list):
             reply_text = content_block[0].get("text", "")
 
-        # Send token records to Langfuse 
-        if trace:
-            usage = response_body.get("usage", {})
-            trace.generation(
-                name="claude-3-haiku",
-                model="anthropic.claude-3-haiku-20240307-v1:0",
-                input=payload,
+        # Send token records and END the generation to mark latency
+        usage = response_body.get("usage", {})
+        _emit_bedrock_metrics("chat", usage.get("input_tokens", 0), usage.get("output_tokens", 0))
+        if generation:
+            generation.end(
                 output=reply_text,
                 usage={"input": usage.get("input_tokens", 0), "output": usage.get("output_tokens", 0)}
             )

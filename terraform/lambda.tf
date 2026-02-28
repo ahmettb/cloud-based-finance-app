@@ -1,4 +1,3 @@
-# Dummy code for initial plan/apply without throwing errors.
 data "archive_file" "dummy_lambda" {
   type        = "zip"
   output_path = "${path.module}/dummy_lambda.zip"
@@ -26,19 +25,16 @@ resource "aws_iam_role" "lambda_role" {
   })
 }
 
-# Attach policy to allow Lambda to connect to VPC/internet and write cloudwatch logs
 resource "aws_iam_role_policy_attachment" "lambda_vpc_access" {
   role       = aws_iam_role.lambda_role.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
 }
 
-# Attach policy to allow Lambda to send OpenTelemetry/X-Ray Traces
 resource "aws_iam_role_policy_attachment" "lambda_xray_access" {
   role       = aws_iam_role.lambda_role.name
   policy_arn = "arn:aws:iam::aws:policy/AWSXrayWriteOnlyAccess"
 }
 
-# Attach inline policy for AWS Textract and AWS Bedrock (Claude 3)
 resource "aws_iam_role_policy" "lambda_ai_services_policy" {
   name = "${var.project_name}-ai-services-policy"
   role = aws_iam_role.lambda_role.id
@@ -89,10 +85,8 @@ resource "aws_iam_role_policy" "lambda_ai_services_policy" {
   })
 }
 
-# Fetch AWS Account ID dynamically for IAM policies
 data "aws_caller_identity" "current" {}
 
-# Store Database Password Securely in AWS SSM Parameter Store
 resource "aws_ssm_parameter" "db_password" {
   name        = "/${var.project_name}/prod/db-password"
   description = "Database password for ${var.project_name}"
@@ -114,7 +108,6 @@ resource "aws_ssm_parameter" "langfuse_public_key" {
   value       = var.langfuse_public_key
 }
 
-# Backend Lambda (Private Subnet)
 resource "aws_lambda_function" "backend_lambda" {
   function_name    = "backend_lambda"
   role             = aws_iam_role.lambda_role.arn
@@ -122,6 +115,10 @@ resource "aws_lambda_function" "backend_lambda" {
   runtime          = "python3.12"
   filename         = data.archive_file.dummy_lambda.output_path
   source_code_hash = data.archive_file.dummy_lambda.output_base64sha256
+
+  lifecycle {
+    ignore_changes = [filename, source_code_hash]
+  }
 
   vpc_config {
     subnet_ids         = [aws_subnet.private_1.id, aws_subnet.private_2.id]
@@ -160,7 +157,6 @@ resource "aws_lambda_function" "backend_lambda" {
   }
 }
 
-# AI Lambda (Private Subnet)
 resource "aws_lambda_function" "lambda_ai" {
   function_name    = "lambda_ai"
   role             = aws_iam_role.lambda_role.arn
@@ -168,6 +164,10 @@ resource "aws_lambda_function" "lambda_ai" {
   runtime          = "python3.12"
   filename         = data.archive_file.dummy_lambda.output_path
   source_code_hash = data.archive_file.dummy_lambda.output_base64sha256
+
+  lifecycle {
+    ignore_changes = [filename, source_code_hash]
+  }
 
   vpc_config {
     subnet_ids         = [aws_subnet.private_1.id, aws_subnet.private_2.id]
@@ -203,7 +203,6 @@ resource "aws_lambda_function" "lambda_ai" {
   }
 }
 
-# API Gateway Permissions to Invoke Lambdas
 resource "aws_lambda_permission" "apigw_invoke_backend" {
   statement_id  = "AllowAPIGatewayInvokeBackend"
   action        = "lambda:InvokeFunction"
@@ -220,7 +219,6 @@ resource "aws_lambda_permission" "apigw_invoke_ai" {
   source_arn    = "${aws_apigatewayv2_api.api.execution_arn}/*/*"
 }
 
-# S3 Bucket for Uploading Receipts
 resource "aws_s3_bucket" "receipts_bucket" {
   bucket = "${var.project_name}-receipts-storage-${data.aws_caller_identity.current.account_id}"
 
@@ -229,7 +227,17 @@ resource "aws_s3_bucket" "receipts_bucket" {
   }
 }
 
-# Attach policy to allow Lambda to read/write to S3 Bucket
+resource "aws_s3_bucket_server_side_encryption_configuration" "receipts" {
+  bucket = aws_s3_bucket.receipts_bucket.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+    bucket_key_enabled = true
+  }
+}
+
 resource "aws_iam_role_policy" "lambda_s3_policy" {
   name = "${var.project_name}-s3-policy"
   role = aws_iam_role.lambda_role.id
@@ -255,8 +263,8 @@ resource "aws_iam_role_policy" "lambda_s3_policy" {
 }
 
 resource "aws_sqs_queue" "lambda_dlq" {
-  name                      = "${var.project_name}-lambda-dlq"
-  message_retention_seconds = 1209600 
+  name                       = "${var.project_name}-lambda-dlq"
+  message_retention_seconds  = 1209600
   visibility_timeout_seconds = 60
 
   tags = {
@@ -264,7 +272,6 @@ resource "aws_sqs_queue" "lambda_dlq" {
   }
 }
 
-# Backend Lambda'ya DLQ bağla
 resource "aws_lambda_function_event_invoke_config" "backend_dlq" {
   function_name = aws_lambda_function.backend_lambda.function_name
 
@@ -289,25 +296,19 @@ resource "aws_iam_role_policy" "lambda_sqs_policy" {
   })
 }
 
-
-
 resource "aws_lambda_alias" "backend_prod" {
   name             = "prod"
   function_name    = aws_lambda_function.backend_lambda.function_name
-  function_version = "$LATEST"  # CI/CD ile alias update edilir
-  description      = "Production alias — rollback için buradaki versiyonu değiştir"
+  function_version = "$LATEST"
 }
 
 resource "aws_lambda_alias" "ai_prod" {
   name             = "prod"
   function_name    = aws_lambda_function.lambda_ai.function_name
   function_version = "$LATEST"
-  description      = "Production alias — rollback için buradaki versiyonu değiştir"
 }
-
 
 resource "aws_lambda_function_event_invoke_config" "ai_concurrency" {
   function_name          = aws_lambda_function.lambda_ai.function_name
-  maximum_retry_attempts = 0 # AI analizlerde retry istemiyoruz — sonuç stale olur
+  maximum_retry_attempts = 0
 }
-

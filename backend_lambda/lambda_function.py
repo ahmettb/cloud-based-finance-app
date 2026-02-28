@@ -76,7 +76,7 @@ LANGFUSE_PUBLIC_KEY = os.environ.get("LANGFUSE_PUBLIC_KEY")
 LANGFUSE_SECRET_KEY = os.environ.get("LANGFUSE_SECRET_KEY")
 LANGFUSE_HOST = os.environ.get("LANGFUSE_HOST", "https://cloud.langfuse.com")
 # TEMPORARILY SET TO TRUE FOR MIGRATIONS
-RUN_DB_MIGRATIONS_ON_START = True
+RUN_DB_MIGRATIONS_ON_START = False  # Prod'da False — migration'lar manuel tetiklenmeli (lambda invoke --payload '{"action":"migrate"}')
 
 # ============================================================
 # AWS CLIENTS

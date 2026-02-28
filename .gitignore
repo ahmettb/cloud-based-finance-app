@@ -66,20 +66,19 @@ finance-app-frontend/yarn-debug.log*
 finance-app-frontend/yarn-error.log*
 
 # === TERRAFORM SECRETS & STATE ===
-# State dosyası: AWS kaynaklarının gerçek ID'leri ve bazen plaintext secret'lar içerir
+# .tf dosyaları (altyapı kodu) Git'te İZLENMELİ — reproducible infra için şart
+# Sadece state, secret ve geçici dosyalar ignore edilir:
 terraform/.terraform/
 terraform/.terraform.lock.hcl
 terraform/terraform.tfstate
 terraform/terraform.tfstate.backup
-# tfvars genellikle db_password, api_key gibi değerler içerir
 terraform/terraform.tfvars
 terraform/*.tfvars
 terraform/*.auto.tfvars
-# Terraform plan output dosyaları
+terraform/terraform.exe
 terraform/*.tfplan
 terraform/plan.out
-terraform/*.tf
-terraform/*
+terraform/dummy_lambda.zip
 
 # === LAMBDA DEPLOYMENT ARTIFACTS ===
 # Deploy sırasında oluşan zip dosyaları — büyük ve gereksiz

@@ -4327,10 +4327,8 @@ def handle_ai_chat(user_id, body):
     finally:
         release_db_connection(conn)
 
-    # 3. Call Claude 3 Haiku with Context
     context_str = "\n".join(context_docs) if context_docs else "İlgili finansal veri bulunamadı."
     
-    # Varsayılan (Fallback) System Promptumuz:
     system_prompt_text = (
         "Sen kullanıcının kişisel finans asistanı 'ParamNerede' AI'sın. "
         "Aşağıda kullanıcının veri tabanından sistemin otomatik olarak çektiği Kategori Özetleri ve en alakalı Harcama Kayıtları verilmiştir.\n\n"

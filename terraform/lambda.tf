@@ -253,3 +253,61 @@ resource "aws_iam_role_policy" "lambda_s3_policy" {
     ]
   })
 }
+
+resource "aws_sqs_queue" "lambda_dlq" {
+  name                      = "${var.project_name}-lambda-dlq"
+  message_retention_seconds = 1209600 
+  visibility_timeout_seconds = 60
+
+  tags = {
+    Name = "${var.project_name}-lambda-dlq"
+  }
+}
+
+# Backend Lambda'ya DLQ bağla
+resource "aws_lambda_function_event_invoke_config" "backend_dlq" {
+  function_name = aws_lambda_function.backend_lambda.function_name
+
+  destination_config {
+    on_failure {
+      destination = aws_sqs_queue.lambda_dlq.arn
+    }
+  }
+}
+
+resource "aws_iam_role_policy" "lambda_sqs_policy" {
+  name = "${var.project_name}-sqs-policy"
+  role = aws_iam_role.lambda_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action   = ["sqs:SendMessage"]
+      Effect   = "Allow"
+      Resource = aws_sqs_queue.lambda_dlq.arn
+    }]
+  })
+}
+
+
+
+resource "aws_lambda_alias" "backend_prod" {
+  name             = "prod"
+  function_name    = aws_lambda_function.backend_lambda.function_name
+  function_version = "$LATEST"  # CI/CD ile alias update edilir
+  description      = "Production alias — rollback için buradaki versiyonu değiştir"
+}
+
+resource "aws_lambda_alias" "ai_prod" {
+  name             = "prod"
+  function_name    = aws_lambda_function.lambda_ai.function_name
+  function_version = "$LATEST"
+  description      = "Production alias — rollback için buradaki versiyonu değiştir"
+}
+
+
+resource "aws_lambda_function_event_invoke_config" "ai_concurrency" {
+  function_name          = aws_lambda_function.lambda_ai.function_name
+  maximum_retry_attempts = 0 # AI analizlerde retry istemiyoruz — sonuç stale olur
+}
+

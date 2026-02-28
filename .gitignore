@@ -64,3 +64,58 @@ finance-app-frontend/.env
 finance-app-frontend/npm-debug.log*
 finance-app-frontend/yarn-debug.log*
 finance-app-frontend/yarn-error.log*
+
+# === TERRAFORM SECRETS & STATE ===
+# State dosyası: AWS kaynaklarının gerçek ID'leri ve bazen plaintext secret'lar içerir
+terraform/.terraform/
+terraform/.terraform.lock.hcl
+terraform/terraform.tfstate
+terraform/terraform.tfstate.backup
+# tfvars genellikle db_password, api_key gibi değerler içerir
+terraform/terraform.tfvars
+terraform/*.tfvars
+terraform/*.auto.tfvars
+# Terraform plan output dosyaları
+terraform/*.tfplan
+terraform/plan.out
+terraform/*.tf
+terraform/*
+
+# === LAMBDA DEPLOYMENT ARTIFACTS ===
+# Deploy sırasında oluşan zip dosyaları — büyük ve gereksiz
+*.zip
+deployment_package.zip
+deployment_package_ai.zip
+# Lambda invoke test çıktıları
+out.json
+output.json
+response.json
+
+# === DATABASE SCHEMA & SEED FILES ===
+# Hassas tablo yapısı veya seed verisi içerebilir
+*.sql
+database_schema.sql
+schema.sql
+seed.sql
+migrations/*.sql
+
+# === API TEST & CREDENTIALS ===
+# Postman, Insomnia export — API anahtarları içerebilir
+*.collection.json
+*postman*.json
+*insomnia*.json
+# AWS credentials yerel dosyalar
+credentials.json
+aws-credentials.json
+service-account.json
+
+# === MISC SENSITIVE ===
+*.pem
+*.key
+*.p12
+*.pfx
+*.cert
+*.crt
+secrets.json
+config.local.json
+

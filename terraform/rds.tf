@@ -26,6 +26,9 @@ resource "aws_db_instance" "postgres" {
   skip_final_snapshot       = false
   final_snapshot_identifier = "${var.project_name}-final-snapshot"
 
+  # Encryption at rest (FREE — no extra cost)
+  storage_encrypted = true
+
   publicly_accessible    = false
   vpc_security_group_ids = [aws_security_group.rds_sg.id]
   db_subnet_group_name   = aws_db_subnet_group.main.name

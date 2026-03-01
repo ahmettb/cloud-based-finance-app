@@ -4,10 +4,13 @@ resource "aws_security_group" "bastion_sg" {
   vpc_id      = aws_vpc.main.id
 
   ingress {
+    description = "SSH only from within VPC (jump via NAT/Bastion chain)"
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    # SECURITY: Restrict to your office/home IP in production.
+    # Example: cidr_blocks = ["YOUR_IP/32"]
+    cidr_blocks = [aws_vpc.main.cidr_block]
   }
 
   egress {
@@ -35,10 +38,13 @@ resource "aws_security_group" "nat_sg" {
   }
 
   ingress {
+    description = "SSH only from within VPC (management access)"
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    # SECURITY: Restrict to your office/home IP in production.
+    # Example: cidr_blocks = ["YOUR_IP/32"]
+    cidr_blocks = [aws_vpc.main.cidr_block]
   }
 
   egress {

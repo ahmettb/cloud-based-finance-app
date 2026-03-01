@@ -357,7 +357,7 @@ def handle_ai_analyze(user_id, body):
                     "meta": {"generated_at": datetime.utcnow().isoformat() + "Z", "analysis_version": "v5", "period": period, "model_version": BEDROCK_MODEL_ID, "cache_hit": False, "insufficient_data": True},
                 }
                 try:
-                    empty_meta = {"generated_at": datetime.utcnow().isoformat(), "data_sig": _compute_data_signature(sig_row["total"], sig_row["count"], sig_row["last_upd"] or datetime.min, persona), "model": BEDROCK_MODEL_ID, "cache_hit": False, "ttl_seconds": AI_CACHE_TTL_SECONDS}
+                    empty_meta = {"generated_at": datetime.utcnow().isoformat(), "data_sig": _compute_data_signature(sig_row["total"], sig_row["count"], sig_row["last_upd"] or datetime.min, persona), "model": BEDROCK_MODEL_ID, "cache_hit": False, "status": "done", "ttl_seconds": 21600}
                     cur.execute("DELETE FROM ai_insights WHERE user_id=%s AND related_period=%s", (user_id, period))
                     cur.execute("INSERT INTO ai_insights (user_id, insight_type, insight_text, related_period) VALUES (%s,%s,%s,%s)", (user_id, "__meta__", json.dumps(empty_meta, default=_json_default), period))
                     cur.execute("INSERT INTO ai_insights (user_id, insight_type, insight_text, related_period) VALUES (%s,%s,%s,%s)", (user_id, "__result__", json.dumps(empty_analysis, default=_json_default), period))
@@ -365,7 +365,10 @@ def handle_ai_analyze(user_id, body):
                 except Exception as e:
                     logger.error(f"Failed to save empty analysis state: {e}")
                 return api_response(200, empty_analysis)
+
             current_data_sig = _compute_data_signature(sig_row["total"], sig_row["count"], sig_row["last_upd"] or datetime.min, persona)
+
+            # ── Cache & Processing State Kontrolü ─────────────────
             cached_meta, cached_result = None, None
             if use_cache and not force_recompute:
                 cur.execute(
@@ -385,12 +388,27 @@ def handle_ai_analyze(user_id, body):
                 if isinstance(cached_result, str):
                     try: cached_result = json.loads(cached_result)
                     except Exception: cached_result = None
-                if isinstance(cached_meta, dict) and isinstance(cached_result, dict):
-                    generated_at = cached_meta.get("generated_at")
-                    if generated_at and cached_meta.get("data_sig") == current_data_sig:
+
+                if isinstance(cached_meta, dict):
+                    # Hâlâ işleniyorsa → frontend'e "processing" döndür
+                    if cached_meta.get("status") == "processing":
+                        logger.info(
+                            "Analysis still processing — returning status",
+                            extra={"user_id": user_id, "period": period, "module_name": "insights"},
+                        )
+                        return api_response(202, {
+                            "status": "processing",
+                            "message": "Analiz devam ediyor, lütfen bekleyin...",
+                            "period": period,
+                            "meta": {"cache_hit": False, "period": period},
+                        })
+
+                    # Geçerli cache varsa → hemen döndür
+                    if isinstance(cached_result, dict) and cached_meta.get("data_sig") == current_data_sig:
                         try:
+                            generated_at = cached_meta.get("generated_at")
                             age_seconds = (datetime.utcnow() - datetime.fromisoformat(generated_at)).total_seconds()
-                            if age_seconds <= AI_CACHE_TTL_SECONDS:
+                            if age_seconds <= 21600:  # 6 saat TTL
                                 cached_result["is_stale"] = False
                                 if not isinstance(cached_result.get("meta"), dict): cached_result["meta"] = {}
                                 cached_result["meta"]["cache_hit"] = True
@@ -398,6 +416,8 @@ def handle_ai_analyze(user_id, body):
                                 return api_response(200, cached_result)
                         except Exception:
                             pass
+
+            # ── Payload hazırla ───────────────────────────────────
             period_start = f"{period}-01"
             cur.execute(
                 """SELECT merchant_name AS merchant, total_amount AS amount, TO_CHAR(receipt_date, 'YYYY-MM-DD') AS date, category_id
@@ -461,17 +481,21 @@ def handle_ai_analyze(user_id, body):
             goals = cur.fetchall()
             spent_total = _safe_float(sig_row.get("total"), 0.0)
             savings_rate = ((income_total - spent_total) / income_total * 100) if income_total > 0 else 0.0
+
             payload = {
                 "transactions": txs, "monthlyTotals": monthly, "budgets": budgets,
                 "subscriptions": subscriptions, "goals": goals,
                 "financialHealth": {"period_income": round(income_total, 2), "period_spent": round(spent_total, 2), "period_net": round(income_total - spent_total, 2), "savings_rate": round(savings_rate, 1)},
                 "period": period, "categoryMap": {str(k): v for k, v in CATEGORIES.items()},
                 "skipLLM": skip_llm, "persona": persona,
-                # AI Lambda loglarının hangi kullanıcıya ait olduğunu bilinmesi için
                 "userId": str(user_id),
+                # Analiz tamamlanınca AI Lambda bu sig'ı meta'ya yazar
+                "dataSig": current_data_sig,
             }
+
+            # ── Async Invoke — API Gateway timeout riski yok ───────
             logger.info(
-                "Invoking AI Lambda",
+                "Invoking AI Lambda (async)",
                 extra={
                     "user_id": user_id,
                     "method": "POST",
@@ -482,39 +506,44 @@ def handle_ai_analyze(user_id, body):
                     "skip_llm": skip_llm,
                 },
             )
-            invoke_resp = lambda_client.invoke(FunctionName=AI_LAMBDA_FUNCTION_NAME, InvocationType="RequestResponse", Payload=json.dumps(payload, default=_json_default))
-            raw_result = json.loads(invoke_resp["Payload"].read() or "{}")
-            if "body" in raw_result:
-                result_body = raw_result["body"]
-                if isinstance(result_body, str):
-                    try: ai_result = json.loads(result_body)
-                    except Exception: ai_result = {"error": "Invalid AI response body"}
-                else:
-                    ai_result = result_body
-            else:
-                ai_result = raw_result
-            if not isinstance(ai_result, dict):
-                return api_response(500, {"error": "AI returned invalid response"})
-            meta = {
-                "generated_at": datetime.utcnow().isoformat(), "data_sig": current_data_sig,
-                "cache_key": ((ai_result.get("meta") or {}).get("cache_key") if isinstance(ai_result.get("meta"), dict) else None),
-                "model": ((ai_result.get("meta") or {}).get("model_version") if isinstance(ai_result.get("meta"), dict) else BEDROCK_MODEL_ID),
-                "cache_hit": False, "ttl_seconds": AI_CACHE_TTL_SECONDS,
+
+            # processing durumunu DB'ye yaz (AI Lambda başlamadan önce)
+            processing_meta = {
+                "generated_at": datetime.utcnow().isoformat(),
+                "data_sig": current_data_sig,
+                "model": BEDROCK_MODEL_ID,
+                "status": "processing",
+                "cache_hit": False,
+                "ttl_seconds": 21600,
             }
             cur.execute("DELETE FROM ai_insights WHERE user_id=%s AND related_period=%s", (user_id, period))
-            cur.execute("INSERT INTO ai_insights (user_id, insight_type, insight_text, related_period) VALUES (%s,%s,%s,%s)", (user_id, "__meta__", json.dumps(meta, default=_json_default), period))
-            cur.execute("INSERT INTO ai_insights (user_id, insight_type, insight_text, related_period) VALUES (%s,%s,%s,%s)", (user_id, "__result__", json.dumps(ai_result, default=_json_default), period))
-            for insight in ai_result.get("insights", [])[:50]:
-                cur.execute(
-                    "INSERT INTO ai_insights (user_id, insight_type, insight_text, related_period, priority) VALUES (%s,%s,%s,%s,%s)",
-                    (user_id, insight.get("type", "insight"), json.dumps(insight, default=_json_default), period, insight.get("priority", "MEDIUM")),
-                )
+            cur.execute(
+                "INSERT INTO ai_insights (user_id, insight_type, insight_text, related_period) VALUES (%s,'__meta__',%s,%s)",
+                (user_id, json.dumps(processing_meta, default=_json_default), period),
+            )
             conn.commit()
-            ai_result["is_stale"] = False
-            if not isinstance(ai_result.get("meta"), dict): ai_result["meta"] = {}
-            ai_result["meta"]["cache_hit"] = False
-            ai_result["meta"]["data_sig"] = current_data_sig
-            return api_response(200, ai_result)
+
+            # Sonra async invoke — Event = yanıt beklemeden döner
+            lambda_client.invoke(
+                FunctionName=AI_LAMBDA_FUNCTION_NAME,
+                InvocationType="Event",
+                Payload=json.dumps(payload, default=_json_default),
+            )
+
+            # Frontend'e hemen "processing" döndür
+            return api_response(202, {
+                "status": "processing",
+                "message": "Analiz başlatıldı. Birkaç saniye içinde hazır olacak...",
+                "period": period,
+                "meta": {
+                    "cache_hit": False,
+                    "data_sig": current_data_sig,
+                    "period": period,
+                },
+                # Frontend bu alanı görünce poll başlatır
+                "poll_interval_ms": 3000,
+            })
+
     except Exception as exc:
         logger.error(f"AI analysis failed: {exc}", exc_info=True)
         return api_response(500, {"error": "Analysis failed"})

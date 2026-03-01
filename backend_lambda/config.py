@@ -140,7 +140,7 @@ TITAN_EMBEDDING_MODEL_ID = os.environ.get("TITAN_EMBEDDING_MODEL_ID", "amazon.ti
 LANGFUSE_PUBLIC_KEY = os.environ.get("LANGFUSE_PUBLIC_KEY")
 LANGFUSE_SECRET_KEY = os.environ.get("LANGFUSE_SECRET_KEY")
 LANGFUSE_HOST = os.environ.get("LANGFUSE_HOST", "https://cloud.langfuse.com")
-RUN_DB_MIGRATIONS_ON_START = False
+RUN_DB_MIGRATIONS_ON_START = True
 
 # ── AWS Clients ───────────────────────────────────────────────────
 s3_client = boto3.client("s3", region_name=AWS_REGION, config=Config(signature_version="s3v4"))

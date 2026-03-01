@@ -227,6 +227,18 @@ resource "aws_s3_bucket" "receipts_bucket" {
   }
 }
 
+resource "aws_s3_bucket_cors_configuration" "receipts_cors" {
+  bucket = aws_s3_bucket.receipts_bucket.id
+
+  cors_rule {
+    allowed_headers = ["*"]
+    allowed_methods = ["PUT", "POST", "GET", "HEAD"]
+    allowed_origins = ["*"]
+    expose_headers  = ["ETag"]
+    max_age_seconds = 3000
+  }
+}
+
 resource "aws_s3_bucket_server_side_encryption_configuration" "receipts" {
   bucket = aws_s3_bucket.receipts_bucket.id
 

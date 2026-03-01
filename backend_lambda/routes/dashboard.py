@@ -112,8 +112,48 @@ def handle_dashboard(user_id):
                 sp = spent_dash_map.get(cat, 0.0)
                 pct = round((sp / lim) * 100, 1) if lim > 0 else 0.0
                 budgets.append({"id": str(b.get("id", "")), "category_name": cat, "amount": lim, "spent": sp, "percentage": pct})
-            cur.execute("SELECT name, amount, next_payment_date FROM subscriptions WHERE user_id=%s ORDER BY next_payment_date ASC LIMIT 3", (user_id,))
+            cur.execute("SELECT name, amount, next_payment_date FROM subscriptions WHERE user_id=%s", (user_id,))
             subscriptions = cur.fetchall()
+            
+            # Giderlerden (Receipts) "Abonelik" (Kategori 9) olanları getir
+            cur.execute("""
+                SELECT merchant_name AS name, total_amount AS amount, receipt_date AS next_payment_date 
+                FROM receipts 
+                WHERE user_id=%s AND category_id=9 AND status != 'deleted' AND TO_CHAR(receipt_date, 'YYYY-MM')=%s
+            """, (user_id, period))
+            for r in cur.fetchall():
+                subscriptions.append({
+                    "name": r.get("name") or "Abonelik (Fiş/Fatura)",
+                    "amount": _safe_float(r.get("amount")),
+                    "next_payment_date": r.get("next_payment_date")
+                })
+                
+            # Sabit Giderlerden "Abonelik" kategorisindekileri getir
+            cur.execute("""
+                SELECT i.title AS name, p.amount, p.payment_date AS next_payment_date
+                FROM fixed_expense_payments p
+                JOIN fixed_expense_items i ON p.item_id = i.id
+                JOIN fixed_expense_groups g ON i.group_id = g.id
+                WHERE p.user_id=%s AND p.status='paid' AND g.category_type='Abonelik' AND TO_CHAR(p.payment_date, 'YYYY-MM')=%s
+            """, (user_id, period))
+            for r in cur.fetchall():
+                subscriptions.append({
+                    "name": r.get("name") or "Sabit Abonelik",
+                    "amount": _safe_float(r.get("amount")),
+                    "next_payment_date": r.get("next_payment_date")
+                })
+
+            # Aynı isimdeki aboneliklerin tutarlarını topla ve tekrarı önle
+            seen_subs = {}
+            for sub in subscriptions:
+                n = sub["name"]
+                if n not in seen_subs:
+                    seen_subs[n] = {"name": n, "amount": _safe_float(sub.get("amount")), "next_payment_date": sub.get("next_payment_date")}
+                else:
+                    seen_subs[n]["amount"] += _safe_float(sub.get("amount"))
+
+            # En yüksek tutara sahip 5 aboneliği göster
+            final_subs = sorted(list(seen_subs.values()), key=lambda x: x["amount"], reverse=True)[:5]
             cur.execute(
                 """SELECT COUNT(*) FILTER (WHERE status='active') AS active_count,
                        COUNT(*) FILTER (WHERE status='completed') AS completed_count,
@@ -130,7 +170,7 @@ def handle_dashboard(user_id):
                 "period": period, "total_spent": total_spent, "total_income": total_income,
                 "net_balance": net_balance, "avg_amount": avg_amount,
                 "total_receipt_count": total_receipt_count, "categories": categories,
-                "budgets": budgets, "subscriptions": subscriptions,
+                "budgets": budgets, "subscriptions": final_subs,
                 "goals_summary": {
                     "active_count": int(goals.get("active_count") or 0),
                     "completed_count": int(goals.get("completed_count") or 0),

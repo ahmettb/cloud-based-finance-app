@@ -1,6 +1,6 @@
 # ParamNerede - Cloud-Native AI Financial Assistant
 
-**Live Demo:** [https://main.d23l3uhccbs9iv.amplifyapp.com/](https://main.d23l3uhccbs9iv.amplifyapp.com/)
+**Live Demo:** [https://main.doy5nbim771eq.amplifyapp.com/](https://main.doy5nbim771eq.amplifyapp.com/)
 
 > **Note:** This project is a live portfolio demonstration. To optimize cloud costs, it leverages a single-AZ and event-driven asynchronous architecture. Expensive managed services (like NAT Gateways) have been intentionally replaced with budget-friendly alternatives (EC2 NAT Instance). These deviations are documented in the [Demo Constraints](#demo-constraints-vs-production) section.
 

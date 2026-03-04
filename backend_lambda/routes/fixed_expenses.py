@@ -199,12 +199,14 @@ def handle_fixed_expense_item_create(user_id, body):
     body = body or {}
     group_id = body.get("group_id")
     name = str(body.get("name") or "").strip()
-    amount = _safe_float(body.get("amount"), None)
+    # amount isteğe bağlı — bilinmiyorsa 0 kabul edilir
+    raw_amount = body.get("amount")
+    amount = _safe_float(raw_amount, 0.0) if raw_amount is not None and raw_amount != "" else 0.0
     due_day = body.get("day")
-    if not group_id or not name or amount is None:
-        return api_response(400, {"error": "group_id, name and amount are required"})
-    if amount <= 0:
-        return api_response(400, {"error": "amount must be greater than 0"})
+    if not group_id or not name:
+        return api_response(400, {"error": "group_id and name are required"})
+    if amount < 0:
+        return api_response(400, {"error": "amount cannot be negative"})
     try:
         due_day = int(due_day)
         if due_day < 1 or due_day > 31:
@@ -237,9 +239,10 @@ def handle_fixed_expense_item_update(user_id, item_id, body):
             return api_response(400, {"error": "name cannot be empty"})
         updates.append("name=%s"); values.append(name[:150])
     if body.get("amount") is not None:
-        amount = _safe_float(body["amount"], None)
-        if amount is None or amount <= 0:
-            return api_response(400, {"error": "amount must be greater than 0"})
+        # 0 geçerli — bilinmiyorsa 0 bırakılabilir; sadece negatif reddedilir
+        amount = _safe_float(body["amount"], 0.0)
+        if amount < 0:
+            return api_response(400, {"error": "amount cannot be negative"})
         updates.append("amount=%s"); values.append(amount)
     if body.get("day") is not None:
         try:

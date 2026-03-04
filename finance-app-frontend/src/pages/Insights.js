@@ -434,29 +434,14 @@ const Insights = () => {
                     </h1>
                     <p className="text-sm text-slate-500 mt-1">Finansal sağlığınız, aksiyon planlarınız ve hedefleriniz tek bir yerde.</p>
                 </div>
-                <div className="flex flex-col sm:flex-row items-end sm:items-center gap-3">
-                    <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-800 p-1 rounded-lg">
-                        <span className="material-icons-round text-slate-400 ml-2 text-sm">support_agent</span>
-                        <select
-                            value={persona}
-                            onChange={(e) => handlePersonaChange(e.target.value)}
-                            className="bg-transparent border-none text-sm font-bold text-slate-700 dark:text-slate-200 focus:ring-0 cursor-pointer pr-8"
-                        >
-                            <option value="friendly">Koç Modu</option>
-                            <option value="professional">Profesyonel</option>
-                            <option value="strict">Disiplinli</option>
-                        </select>
-                    </div>
-
-                    <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-800 p-1 rounded-lg">
-                        <span className="material-icons-round text-slate-400 ml-2 text-sm">calendar_today</span>
-                        <input
-                            type="month"
-                            value={month}
-                            onChange={(e) => setMonth(e.target.value)}
-                            className="bg-transparent border-none text-sm font-bold text-slate-700 dark:text-slate-200 focus:ring-0 cursor-pointer"
-                        />
-                    </div>
+                <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-800 p-1.5 rounded-lg">
+                    <span className="material-icons-round text-slate-400 ml-1 text-sm">calendar_today</span>
+                    <input
+                        type="month"
+                        value={month}
+                        onChange={(e) => setMonth(e.target.value)}
+                        className="bg-transparent border-none text-sm font-bold text-slate-700 dark:text-slate-200 focus:ring-0 cursor-pointer pr-2"
+                    />
                 </div>
             </div>
 
